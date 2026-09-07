@@ -1,0 +1,2606 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#161A17">
+<title>Rele-Servo Tester</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+:root{
+  --ink:#161A17; --panel:#1E2421; --panel2:#262E29; --line:#38423C;
+  --paper:#E4E7E2; --mute:#8A968F;
+  --volt:#FFD23F; --sage:#86B06A; --rust:#D3543A; --sky:#62A8C4; --amber:#FFA23F;
+  --disp:"Archivo Narrow","Roboto Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono","Roboto Mono",Consolas,monospace;
+  --r:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--ink);color:var(--paper);font-family:var(--body);font-size:15px;line-height:1.45;
+     -webkit-font-smoothing:antialiased;padding-bottom:env(safe-area-inset-bottom)}
+button{font-family:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,select{font-family:var(--mono);background:var(--panel2);border:1px solid var(--line);color:var(--paper);
+             padding:7px 9px;border-radius:7px;font-size:13px}
+:focus-visible{outline:2px solid var(--volt);outline-offset:2px;border-radius:4px}
+/* M3: vecja rezerva pod fiksno glavo - pri 4px se je vrh vsebine se vedno
+   skril pod vrstico zavihkov (zaokrozevanje visine + senca). */
+.wrap{max-width:560px;margin:0 auto;padding:calc(var(--topH, 132px) + 14px) 14px 40px}
+.card{scroll-margin-top:calc(var(--topH, 132px) + 14px)}
+
+/* ---------- glava ---------- */
+/* H3: FIKSNA glava - drsenje se zacne POD njo (sticky je pustil vsebino
+   pod glavo in povzrocal prekrivanje naslovov). Visina se meri dinamicno
+   (--topH), ker vrstica z nacinom delovanja ni vedno prisotna.
+   H8: z-index 55 = nad zatemnitvijo (.scrim 50), da spustni seznam naprav
+   (.sitemenu, znotraj glave) ne pade pod zatemnitev; panel Nastavitve (60)
+   ostane nad glavo. */
+.top{position:fixed;top:0;left:0;right:0;z-index:55;background:var(--ink);padding:12px 14px 0}
+.tophead{display:flex;align-items:center;gap:8px;margin-bottom:10px;position:relative}
+.headbox{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;background:var(--panel);
+         border:1px solid var(--line);border-radius:10px;padding:8px 12px;transition:border-color .15s}
+.headbox[data-multi="1"]{cursor:pointer}
+.headbox[data-multi="1"]:hover{background:var(--panel2);border-color:var(--mute)}
+.headbox[data-multi="1"][data-open="1"]{border-color:var(--volt);background:var(--panel2)}
+.hline{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.hline b{font-family:var(--mono);font-size:15px;font-weight:600;letter-spacing:.04em;color:var(--paper);
+         white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill{display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+      border:1px solid var(--line);border-radius:100px;padding:3px 9px;color:var(--mute);flex:0 0 auto}
+.pill .dot{width:7px;height:7px;border-radius:50%;background:var(--mute)}
+.pill.on{color:var(--sage);border-color:color-mix(in srgb, var(--sage) 45%, var(--line))}
+.pill.on .dot{background:var(--sage);box-shadow:0 0 6px var(--sage)}
+.pill.off{color:var(--rust);border-color:color-mix(in srgb, var(--rust) 45%, var(--line))}
+.pill.off .dot{background:var(--rust)}
+.opmodetag{font-size:10px;color:var(--sky);letter-spacing:.05em;text-transform:uppercase;font-family:var(--mono)}
+.headright{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.gear{font-size:24px;color:var(--mute);padding:4px 6px;line-height:1}
+.gear:hover{color:var(--paper)}
+.hb{flex:0 0 auto;width:32px;height:32px;border-radius:50%;border:1.5px solid var(--volt);
+    position:relative;
+    background:var(--panel2);color:var(--volt);font-family:var(--disp);font-size:13px;font-weight:700;
+    line-height:1;display:inline-flex;align-items:center;justify-content:center;padding:0}
+.hb::before{content:"?"}
+/* H5: nevidno razsirjeno klikalno obmocje do 44px (tarca za prst) */
+.hb::after{content:"";position:absolute;top:50%;left:50%;width:44px;height:44px;transform:translate(-50%,-50%)}
+.hb:hover{background:var(--volt);color:var(--ink)}
+.chev{flex:0 0 auto;width:44px;height:44px;color:var(--mute);font-size:28px;transition:transform .2s;
+      display:inline-flex;align-items:center;justify-content:center}
+.chev.open{transform:rotate(180deg)}
+.sitemenu{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:60;background:var(--panel2);
+          border:1px solid var(--volt);border-radius:var(--r);padding:7px;box-shadow:0 14px 38px rgba(0,0,0,.6);
+          display:none;flex-direction:column;gap:6px}
+.sitemenu.open{display:flex}
+.sitemenu .row{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;
+                border-radius:7px;cursor:pointer}
+.sitemenu .row:hover{background:var(--ink)}
+.sitemenu .row.cur{color:var(--volt)}
+.sitemenu small{display:block;color:var(--mute);font-size:10px;font-family:var(--mono)}
+.relbits{display:flex;gap:3px;margin-left:6px}
+.relbits span{width:6px;height:6px;border-radius:2px;background:var(--mute);display:inline-block}
+.relbits span.on{background:var(--sage)}
+
+/* ---------- zavihki (dinamicno izrisani) ---------- */
+.tabs{display:flex;border-bottom:1px solid var(--line);margin-top:4px}
+.tabs button{flex:1;padding:11px 6px;font-family:var(--disp);font-size:12.5px;letter-spacing:.08em;
+             text-transform:uppercase;color:var(--mute);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs button[aria-selected="true"]{color:var(--volt);border-bottom-color:var(--volt)}
+.page{display:none;padding-top:12px}
+.page.show{display:block}
+
+/* ---------- kartice / zlozljive sekcije ---------- */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:0;margin-bottom:10px;overflow:hidden}
+.chead{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:14px;cursor:pointer}
+.chead h3{font-family:var(--disp);font-size:11.5px;font-weight:600;letter-spacing:.14em;
+          text-transform:uppercase;color:var(--mute);flex:1}
+.cbody{padding:0 14px 14px;overflow:hidden;transition:max-height .25s ease, padding .25s ease}
+.cbody.collapsed{max-height:0!important;padding-top:0;padding-bottom:0}
+.row2{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+label.lbl{color:var(--mute);font-size:11.5px;min-width:56px;font-family:var(--body)}
+input[type=number]{width:64px}
+.btn{background:var(--panel2);border:1px solid var(--line);color:var(--paper);padding:7px 13px;
+     border-radius:7px;font-family:var(--disp);letter-spacing:.03em;font-size:13px}
+.btn:hover{border-color:var(--volt)}
+.btn.primary{background:var(--volt);color:var(--ink);border-color:var(--volt);font-weight:700}
+.btn.ghost{background:none;color:var(--mute);border:1px solid var(--line)}
+.sep{border-top:1px solid var(--line);padding-top:10px;margin-top:6px}
+.small{font-size:11px;color:var(--mute)}
+.analog{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.analog .a{background:var(--panel2);border-radius:8px;padding:10px;text-align:center}
+.analog .a b{display:block;font-size:20px;color:var(--volt);font-family:var(--mono)}
+.analog .a span{color:var(--mute);font-size:11px}
+.tag{display:inline-block;padding:3px 9px;border-radius:100px;font-size:10.5px;letter-spacing:.06em;
+     text-transform:uppercase;background:var(--panel2);color:var(--mute);border:1px solid var(--line)}
+.tag.on{color:var(--sage);border-color:color-mix(in srgb, var(--sage) 45%, var(--line))}
+.tag.off{color:var(--rust);border-color:color-mix(in srgb, var(--rust) 45%, var(--line))}
+.empty{color:var(--mute);text-align:center;padding:34px 14px}
+
+/* ---------- osciloskop ---------- */
+.osc-tb{display:flex;gap:5px;margin-bottom:10px;flex-wrap:wrap}
+.osc-tb button{padding:6px 10px;border:1px solid var(--line);border-radius:7px;font-family:var(--mono);font-size:11.5px;color:var(--mute)}
+.osc-tb button[aria-pressed="true"]{border-color:var(--volt);color:var(--volt)}
+.osc-grp{margin-bottom:10px}
+.osc-grp .lbl2{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);margin-bottom:4px;
+               font-family:var(--disp);display:flex;justify-content:space-between}
+.osc-canvas-wrap{position:relative;background:var(--panel2);border-radius:8px;border:1px solid var(--line);
+                  touch-action:pan-y;overflow:hidden}
+.osc-canvas-wrap canvas{display:block;width:100%}
+.osc-tip{position:absolute;top:4px;left:6px;background:rgba(0,0,0,.65);border:1px solid var(--volt);
+         border-radius:6px;padding:4px 8px;font-family:var(--mono);font-size:10.5px;color:var(--paper);
+         pointer-events:none;display:none;white-space:nowrap;z-index:5}
+.osc-legend{display:flex;gap:10px;margin-top:4px;flex-wrap:wrap}
+.osc-legend span{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--mute);font-family:var(--mono)}
+.osc-legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
+
+/* ---------- rele/servo kartice (posamezni okvirji) ---------- */
+.unit-card{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px;margin-bottom:9px}
+.uc-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px}
+.uc-head span.nm{font-family:var(--disp);font-size:12.5px;letter-spacing:.04em;color:var(--paper)}
+.livebadge{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:100px;background:var(--panel);
+           color:var(--mute);border:1px solid var(--line)}
+.livebadge.on{color:var(--sage);border-color:color-mix(in srgb, var(--sage) 45%, var(--line))}
+.livebadge.off{color:var(--rust);border-color:color-mix(in srgb, var(--rust) 45%, var(--line))}
+.mtog{display:flex;gap:0;margin-bottom:9px;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.mtog button{flex:1;padding:11px 7px;font-family:var(--disp);font-size:11.5px;letter-spacing:.04em;color:var(--mute);background:var(--panel)}
+.mtog button.active{background:var(--volt);color:var(--ink);font-weight:700}
+.onoff-btn{width:100%;padding:12px;border-radius:7px;font-family:var(--disp);font-size:14px;font-weight:700;
+           letter-spacing:.08em;border:1.5px solid var(--line)}
+.onoff-btn.on{background:var(--sage);color:#10160f;border-color:var(--sage)}
+.onoff-btn.off{background:var(--rust);color:#1a0d0a;border-color:var(--rust)}
+.tblock{margin-bottom:8px}
+.tblock .trow{display:flex;gap:8px;align-items:center}
+.tblock label{color:var(--mute);font-size:11px;min-width:36px}
+.tblock input[type=number]{width:58px}
+.stepslider{flex:1;accent-color:var(--volt);height:22px}
+.pos-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.pos-row label{color:var(--mute);font-size:11px;min-width:52px}
+.pos-row input[type=number]{width:64px}
+.osc-full .osc-canvas-wrap{height:110px}
+.osc-empty{color:var(--mute);text-align:center;padding:24px;font-size:12.5px}
+
+/* onemogocene kontrole (naprava ni online, ali binarno stetje zaklene releje) */
+.locked{opacity:.42;pointer-events:none;filter:grayscale(.5)}
+.locknote{font-size:11.5px;color:var(--amber);padding:8px 10px;border:1px solid var(--line);
+          border-radius:8px;background:var(--panel2);margin-bottom:10px}
+
+/* ---------- debug polje (Simulator) ---------- */
+.debug-box{background:#0c100e;border:1px solid var(--line);border-radius:8px;padding:8px;
+           max-height:320px;overflow-y:auto;font-family:var(--mono);font-size:10.5px;line-height:1.5;
+           color:#9fd18a;white-space:pre-wrap;word-break:break-all;margin-top:8px}
+.debug-box .err{color:var(--rust)}
+
+/* ---------- drawer ---------- */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;display:none}
+.scrim.show{display:block}
+.drawer{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--panel);
+        border-top:1px solid var(--line);border-radius:16px 16px 0 0;padding:10px 16px 24px;
+        max-height:82vh;overflow-y:auto;transform:translateY(105%);transition:transform .22s;
+        box-shadow:0 -14px 40px rgba(0,0,0,.5)}
+.drawer.open{transform:translateY(0)}
+.grip{width:38px;height:4px;border-radius:3px;background:var(--line);margin:2px auto 12px}
+.hrow{display:flex;align-items:center;gap:8px;margin:16px 0 9px}
+.hrow:first-of-type{margin-top:2px}
+.hrow h3{font-family:var(--disp);font-size:14px;font-weight:700;letter-spacing:.06em;color:var(--paper);flex:1}
+.hrow h4{font-family:var(--disp);font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+         color:var(--mute);flex:1}
+.sitelist .r{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-bottom:1px solid var(--line)}
+.sitelist .r .r1{display:flex;gap:6px}
+.sitelist input{flex:1;min-width:0}
+.sitelist select{width:100%}
+.hclose{width:26px;height:26px;border-radius:50%;border:1px solid var(--line);color:var(--mute);
+        display:inline-flex;align-items:center;justify-content:center;font-size:13px}
+.hclose:hover{color:var(--paper);border-color:var(--paper)}
+.hback{color:var(--mute);font-size:13px;font-family:var(--disp)}
+#helpBody p{font-size:13px;line-height:1.6;margin-bottom:10px;color:var(--paper)}
+#helpBody.hidx button{display:block;width:100%;text-align:left;padding:11px 12px;margin-bottom:6px;
+                       border:1px solid var(--line);border-radius:9px;color:var(--paper);font-family:var(--body)}
+#helpBody.hidx button:hover{border-color:var(--volt);color:var(--volt)}
+/* K4: izbirnik barvnih palet (prevzeto iz EF projekta) */
+.themes{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.themes button{display:flex;align-items:center;gap:9px;border:1px solid var(--line);
+               border-radius:9px;padding:8px;color:var(--paper);text-align:left}
+.themes button[aria-pressed="true"]{border-color:var(--volt);background:var(--panel2)}
+.themes .sw{display:flex;gap:2px;padding:5px;border:1px solid;border-radius:5px;flex:0 0 auto}
+.themes .sw i{width:7px;height:14px;border-radius:2px;display:block}
+.themes .tn{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* visok kontrast (palete z oznako +): debelejse crte, berljivo na soncu */
+body.hc .card,body.hc .unit-card,body.hc .btn,body.hc .mtog,body.hc .onoff-btn,
+body.hc .themes button,body.hc .langGrid button,body.hc input,body.hc select,
+body.hc .osc-canvas-wrap,body.hc .headbox,body.hc .pill{border-width:2px}
+body.hc .chead h3,body.hc .uc-head span.nm{font-weight:700}
+
+.langGrid{display:flex;gap:8px}
+.langGrid button{flex:1;padding:10px;border:1px solid var(--line);border-radius:9px;font-family:var(--disp);
+                  letter-spacing:.04em}
+.langGrid button[aria-pressed="true"]{border-color:var(--volt);color:var(--volt)}
+
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,90px);background:var(--panel2);
+       border:1px solid var(--line);border-radius:100px;padding:9px 18px;font-size:12.5px;z-index:70;
+       transition:transform .25s;max-width:88vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.toast.show{transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="tophead">
+    <div class="headbox" id="headbox" onclick="toggleSiteMenu()">
+      <div class="hline">
+        <b id="siteName" data-i="noDevice">—</b>
+        <span class="pill" id="connPill" onclick="event.stopPropagation();reconnectNow()" title="—"><span class="dot"></span><span id="connPillTxt">—</span></span>
+      </div>
+      <div class="opmodetag"><span id="opModeTag"></span> <span id="verTag" style="color:var(--mute)"></span></div>
+    </div>
+    <div class="headright">
+      <button class="hb" onclick="openHelp('index')" aria-label="Help"></button>
+      <button class="gear" onclick="openDrawer()" aria-label="Settings">⚙</button>
+    </div>
+    <div class="sitemenu" id="siteMenu"></div>
+  </div>
+
+  <div class="tabs" role="tablist" id="tabsBar"></div>
+</div>
+
+<div class="wrap">
+  <div id="tab-nadzor" class="page show"></div>
+  <div id="tab-simulator" class="page"></div>
+  <div id="tab-osciloskop" class="page"></div>
+</div>
+
+<!-- ===== NASTAVITVE (drawer) ===== -->
+<div class="scrim" id="scrim" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer" role="dialog" aria-label="Settings">
+  <div class="grip"></div>
+  <div class="hrow"><h3 data-i="cfgTitle">Nastavitve</h3>
+    <button class="hclose" onclick="closeDrawer()" aria-label="Close">✕</button></div>
+
+  <div class="hrow"><h4 data-i="cfgDevices">Naprave</h4>
+    <button class="hb" onclick="openHelp('hSettings')" aria-label="?"></button></div>
+  <div class="sitelist" id="siteList"></div>
+  <div class="row2" style="margin-top:10px">
+    <button class="btn" onclick="addSite()" data-i="cfgAddDevice">+ Dodaj napravo</button>
+  </div>
+  <div class="row2" style="margin-top:12px">
+    <button class="btn" id="saveBtn" onclick="saveSettings()" data-i="btnSave">Shrani</button>
+    <button class="btn" onclick="applySettings()" data-i="btnApply">Uporabi</button>
+  </div>
+
+  <div class="hrow"><h4 data-i="cfgTheme">Barvna paleta</h4></div>
+  <div class="themes" id="themeGrid"></div>
+
+  <div class="hrow"><h4 data-i="cfgLang">Jezik / Language</h4></div>
+  <div class="langGrid" id="langGrid"></div>
+</div>
+
+<!-- ===== POMOČ (drawer) ===== -->
+<div class="scrim" id="hscrim" onclick="closeHelp()"></div>
+<div class="drawer help" id="helpSheet" role="dialog" aria-label="Help">
+  <div class="grip"></div>
+  <div class="hrow">
+    <button class="hback" id="helpBack" onclick="openHelp('index')" hidden>‹</button>
+    <h3 id="helpTitle" style="flex:1">—</h3>
+    <button class="hclose" onclick="closeHelp()" aria-label="Close">✕</button>
+  </div>
+  <div id="helpBody"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   I18N
+   ============================================================ */
+// K2: verzija na ENEM mestu - prikaze se v glavi
+const APP_VERSION = 'V42';
+
+// ============================================================
+// K4: BARVNE PALETE (prevzete iz EF/Pastir projekta)
+// 5 nocnih + 6 z visokim kontrastom za delo na soncu (oznaka +).
+// ============================================================
+const THEMES=[
+ {id:"pasnik", n:"Pašnik",  c:{ink:"#161A17",panel:"#1E2421",panel2:"#262E29",line:"#38423C",
+    paper:"#E4E7E2",mute:"#8A968F",volt:"#FFD23F",sage:"#86B06A",rust:"#D3543A",sky:"#62A8C4",amber:"#FFA23F"}},
+ {id:"nocna",  n:"Noč",     c:{ink:"#0E141F",panel:"#161E2C",panel2:"#1E293A",line:"#2E3D52",
+    paper:"#DDE6F2",mute:"#7D8DA5",volt:"#5AD1F0",sage:"#5FD3A6",rust:"#F0576B",sky:"#8B9CF5",amber:"#FFB454"}},
+ {id:"jantar", n:"Jantar",  c:{ink:"#1A1410",panel:"#241C16",panel2:"#2E241C",line:"#463629",
+    paper:"#F0E3D3",mute:"#A08D77",volt:"#FFB454",sage:"#B5C25E",rust:"#E05A3C",sky:"#6FB5C9",amber:"#FF8F3C"}},
+ {id:"gozd",   n:"Gozd",    c:{ink:"#0D1710",panel:"#132018",panel2:"#1A2C20",line:"#274434",
+    paper:"#DCEEDF",mute:"#7C9C87",volt:"#B8E62E",sage:"#4FD37C",rust:"#E85D4A",sky:"#4FC3D9",amber:"#FFC24A"}},
+ {id:"vino",   n:"Vino",    c:{ink:"#180F16",panel:"#22161F",panel2:"#2D1E29",line:"#452F3F",
+    paper:"#F2DFEC",mute:"#A2849A",volt:"#FF7FB0",sage:"#9BDF6E",rust:"#F04D6A",sky:"#9C8CF0",amber:"#FFA95C"}},
+ {id:"termnoc",n:"Terminal noč", c:{ink:"#0A0503",panel:"#140906",panel2:"#1E0F09",line:"#3D1F16",
+    paper:"#E8A87C",mute:"#8C5A45",volt:"#FF8F52",sage:"#E8B86A",rust:"#FF5A3D",sky:"#D98A5C",amber:"#FFB347"}},
+ {id:"jeklo",  n:"Jeklo +", hc:1, c:{ink:"#0A0C0E",panel:"#14181C",panel2:"#1F262C",line:"#5A6873",
+    paper:"#FFFFFF",mute:"#BAC6D1",volt:"#FFB000",sage:"#3CD060",rust:"#FF3B30",sky:"#40C4FF",amber:"#FF8C00"}},
+ {id:"term",   n:"Terminal +", hc:1, c:{ink:"#000000",panel:"#060A06",panel2:"#0E160E",line:"#2F7A3F",
+    paper:"#EAFFEA",mute:"#7FD98A",volt:"#00FF5A",sage:"#00E5A0",rust:"#FF2D2D",sky:"#00E0FF",amber:"#FFE500"}},
+ {id:"termson",n:"Terminal sonce +", hc:1, c:{ink:"#000000",panel:"#080600",panel2:"#120D00",line:"#7A5C00",
+    paper:"#FFFFFF",mute:"#D9C98A",volt:"#FFD400",sage:"#8CFF1E",rust:"#FF2020",sky:"#1ED4FF",amber:"#FFAA00"}},
+ {id:"papir",  n:"Papir +", hc:1, c:{ink:"#FFFFFF",panel:"#FFFFFF",panel2:"#E9E9E9",line:"#7A7A7A",
+    paper:"#000000",mute:"#3A3A3A",volt:"#9A5300",sage:"#14601F",rust:"#A80000",sky:"#00417A",amber:"#7A3B00"}},
+ {id:"sneg",   n:"Sneg +", hc:1, c:{ink:"#F1F5FA",panel:"#FFFFFF",panel2:"#DFE8F1",line:"#6C7F91",
+    paper:"#04101B",mute:"#2C3F52",volt:"#8A5200",sage:"#0F5B33",rust:"#9E0B0B",sky:"#03457C",amber:"#6F3600"}},
+ {id:"sonce",  n:"Sonce +", hc:1, c:{ink:"#FFFCF2",panel:"#FFFFFF",panel2:"#F4EBD2",line:"#6B6252",
+    paper:"#000000",mute:"#33301F",volt:"#A35200",sage:"#125A18",rust:"#9E0000",sky:"#00366F",amber:"#6E3300"}}
+];
+
+function applyTheme(id){
+  const t = THEMES.find(x=>x.id===id) || THEMES[0];
+  const r = document.documentElement.style;
+  Object.keys(t.c).forEach(k=>r.setProperty('--'+k, t.c[k]));
+  document.body.classList.toggle('hc', !!t.hc);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if(meta) meta.setAttribute('content', t.c.ink);
+  lsSetPlain('rs_theme', id);
+  buildThemeGrid();
+  // graf se risi z barvami iz palete -> osvezi
+  if(typeof syncOscColors === 'function') syncOscColors();
+  // legenda je HTML (ne platno), zato ob menjavi teme prerisemo cel zavihek,
+  // sicer bi barvni kvadratki ostali iz prejsnjega nabora
+  if(currentTab==='osciloskop' && currentSite()) renderOscFull();
+}
+function buildThemeGrid(){
+  const box = document.getElementById('themeGrid'); if(!box) return;
+  const cur = lsGetPlain('rs_theme','pasnik');
+  box.innerHTML='';
+  THEMES.forEach(t=>{
+    const b=document.createElement('button');
+    b.type='button'; b.setAttribute('aria-pressed', t.id===cur?'true':'false');
+    b.innerHTML='<span class="sw"></span><span class="tn"></span>';
+    const sw=b.querySelector('.sw');
+    sw.style.background=t.c.panel; sw.style.borderColor=t.c.line;
+    ['volt','sky','sage','rust'].forEach(k=>{
+      const d=document.createElement('i'); d.style.background=t.c[k]; sw.appendChild(d);
+    });
+    b.querySelector('.tn').textContent=t.n;
+    b.onclick=()=>applyTheme(t.id);
+    box.appendChild(b);
+  });
+}
+
+const LANGS = [{id:'sl', n:'Slovenščina'}, {id:'en', n:'English'}];
+function lsGetPlain(k, def){ try{ const v=localStorage.getItem(k); return v!==null ? v : def; }catch(e){ return def; } }
+function lsSetPlain(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
+let LANG = lsGetPlain('rs_lang', 'sl');
+
+const I18N = {
+sl:{
+  noDevice:"Ni naprave", tabControl:"Nadzor", tabSim:"Simulator", tabOsc:"Osciloskop",
+  cfgTitle:"Nastavitve", cfgDevices:"Naprave", cfgAddDevice:"+ Dodaj napravo", cfgLang:"Jezik / Language", cfgTheme:"Barvna paleta",
+  phName:"Ime", phId:"ID (6 mest)", phMqtt:"MQTT broker",
+  idHint:"6 hex znakov - zadnji trije bajti MAC naslova naprave (izpiše se na Serial ob zagonu)", opSimLocal:"Simulacija lokalno", opSimBroker:"Simulacija broker", opReal:"Realno delovanje",
+  cardRelays:"Releji", relayN:"Rele", lblOn:"ON", lblOff:"OFF",
+  optManual:"Ročno", optPeriod:"Perioda", lblRampMs:"Čas prehoda (ms)",
+  lblTonL:"Ton", lblToffL:"Toff", btnSave:"Shrani", btnApply:"Uporabi",
+  cardDebug:"Diagnostika", btnClear:"Počisti", btnCopy:"Kopiraj", btnShowLog:"Prikaži", logCopied:"Dnevnik kopiran", logCopyFail:"Kopiranje ni uspelo", logEmpty:"Dnevnik je prazen", newDeviceName:"Nova naprava",
+  savedOk:"Nastavitve shranjene", appliedOk:"Sistem ponovno zagnan",
+  cfgTimeout:"Časovna omejitev offline (s)",
+  lblPosOff:"Pozicija OFF", lblPosOn:"Pozicija ON", srvApplyHint:"Vrednosti se upoštevajo šele ob kliku na ON/OFF.",
+  lblBinCounter:"Binarno periodično štetje", lblBinPeriod:"Perioda koraka", lblBinValue:"Vrednost",
+  binLockNote:"Med binarnim štetjem so posamezni releji zaklenjeni.",
+  cfgOfflineGuard:"Ob offline klientu izklopi izhode", cfgOfflineGuardHint:"Po 60 s brez povezave gredo vsi izhodi na 0 in delovanje se ustavi. Za dolge teste pusti izklopljeno.",
+  cfgBootMode:"Ob zagonu naprave", cfgBoot0:"Vsi izhodi na 0", cfgBootRestore:"Obnovi zadnje stanje",
+  waitOnline:"Naprava ni povezana. Kontrole so onemogočene, dokler se ne javi.", lblBinary:"Binarno",
+  stateActive:"AKTIVNO", stateInactive:"neaktivno",
+  cardServo:"Servo izhodi", servoN:"Servo",
+  lblPosA:"PozA", lblPosB:"PozB",
+  cardAnalog:"Analogni vhodi (0-40V)", inputN:"Vhod",
+  cardSim:"Simulator", simHint:"Virtualna naprava deluje neprekinjeno, tako kot prava. Krmili se iz zavihka Nadzor; tu je le prikaz stanja in simulirani analogni vhodi.",
+  cardSimAnalog:"Simulirani analogni vhodi (0-40V)",
+  stOnline:"ONLINE", stOffline:"OFFLINE", reconnecting:"Ponovno povezovanje…", stNone:"—",
+  alertNoMqtt:"MQTT ni povezan (ni dostopa do brokerja).", cmdFailed:"Naprava ni potrdila ukaza",
+  emptyNoDevice:"Ni dodane naprave. Odpri nastavitve (⚙) in dodaj napravo.",
+  helpIdxTitle:"Kazalo pomoči",
+  hRelays:"Releji", hRelaysT:"Vsak izhod ima Static način (vklop/izklop) ali Utripanje (Ton/Toff v sekundah, 0.1–50s). Binarno polje krmili vseh 4 relejev naenkrat kot binarno število 0–15 (rele1=bit1 … rele4=bit4).",
+  hServo:"Servo izhodi", hServoT:"Static: fiksna pozicija 0–255. Nihanje: servo preklaplja med PozA in PozB s časoma Ton/Toff.",
+  hAnalog:"Analogni vhodi", hAnalogT:"4 vhodi merijo napetost 0–40V, naprava jih periodično objavi preko MQTT.",
+  hSim:"Simulator", hSimT:"Vsaka naprava ima svoj način delovanja (Nastavitve → Način): Simulacija lokalno piše stanje direktno v vmesnik, Simulacija broker pošilja/sprejema prava MQTT sporočila, Realno delovanje izklopi simulacijo (samo prava naprava).",
+  hSettings:"Nastavitve naprav", hSettingsT:"Dodaj, uredi ali izbriši napravo (ime, 6-mestni ID, MQTT broker, način delovanja). ID naprave je zadnjih 6 hex znakov MAC naslova ESP32.",
+  hOsc:"Osciloskop", hOscT:"Prikaže potek vseh kanalov v času. Časovna baza določa okno prikaza. Ob simulaciji so podatki iz simulatorja, pri realnem delovanju iz naprave (releji in servo kot dogodki, analogni vhodi kot vzorci). Ščipni prsta narazen/skupaj za povečavo, tapni točko za vrednost.",
+  oscNoData:"Ni podatkov.", oscTapHint:"Tapni graf za vrednost v točki", oscNow:"zdaj",
+  oscStop:"Ustavi prikaz", oscStart:"Zaženi prikaz", oscLive:"V ŽIVO", oscFrozen:"USTAVLJENO", oscPanHint:"Povleci levo/desno za pomik po zgodovini",
+  oscWinInfo:"Okno", oscPos:"Položaj", oscSamples:"vzorcev nazaj",
+  grpRelays:"Releji", grpServo:"Servo", grpAnalog:"Analog"
+},
+en:{
+  noDevice:"No device", tabControl:"Control", tabSim:"Simulator", tabOsc:"Scope",
+  cfgTitle:"Settings", cfgDevices:"Devices", cfgAddDevice:"+ Add device", cfgLang:"Language / Jezik", cfgTheme:"Colour palette",
+  phName:"Name", phId:"ID (6 chars)", phMqtt:"MQTT broker",
+  idHint:"6 hex characters - the last three bytes of the device MAC address (printed on Serial at boot)", opSimLocal:"Local simulation", opSimBroker:"Broker simulation", opReal:"Real operation",
+  cardRelays:"Relays", relayN:"Relay", lblOn:"ON", lblOff:"OFF",
+  optManual:"Manual", optPeriod:"Period", lblRampMs:"Transition time (ms)",
+  lblTonL:"Ton", lblToffL:"Toff", btnSave:"Save", btnApply:"Apply",
+  cardDebug:"Diagnostics", btnClear:"Clear", btnCopy:"Copy", btnShowLog:"Show", logCopied:"Log copied", logCopyFail:"Copy failed", logEmpty:"Log is empty", newDeviceName:"New device",
+  savedOk:"Settings saved", appliedOk:"System restarted",
+  cfgTimeout:"Offline timeout (s)",
+  lblPosOff:"Position OFF", lblPosOn:"Position ON", srvApplyHint:"Values are applied only when you tap ON/OFF.",
+  lblBinCounter:"Binary periodic counter", lblBinPeriod:"Step period", lblBinValue:"Value",
+  binLockNote:"Individual relays are locked while binary counting runs.",
+  cfgOfflineGuard:"Turn outputs off when client goes offline", cfgOfflineGuardHint:"After 60 s without connection all outputs go to 0 and operation stops. Leave off for long tests.",
+  cfgBootMode:"On device boot", cfgBoot0:"All outputs to 0", cfgBootRestore:"Restore last state",
+  waitOnline:"Device not connected. Controls are disabled until it reports in.", lblBinary:"Binary",
+  stateActive:"ACTIVE", stateInactive:"inactive",
+  cardServo:"Servo outputs", servoN:"Servo",
+  lblPosA:"PosA", lblPosB:"PosB",
+  cardAnalog:"Analog inputs (0-40V)", inputN:"Input",
+  cardSim:"Simulator", simHint:"The virtual device runs continuously, like a real one. Control it from the Control tab; this tab only shows state and simulated analog inputs.",
+  cardSimAnalog:"Simulated analog inputs (0-40V)",
+  stOnline:"ONLINE", stOffline:"OFFLINE", reconnecting:"Reconnecting…", stNone:"—",
+  alertNoMqtt:"MQTT not connected (broker unreachable).", cmdFailed:"Device did not confirm the command",
+  emptyNoDevice:"No device added. Open settings (⚙) and add a device.",
+  helpIdxTitle:"Help index",
+  hRelays:"Relays", hRelaysT:"Each output has Static mode (on/off) or Blink (Ton/Toff in seconds, 0.1–50s). The Binary field drives all 4 relays at once as a binary number 0–15 (relay1=bit1 … relay4=bit4).",
+  hServo:"Servo outputs", hServoT:"Static: fixed position 0–255. Oscillate: servo switches between PosA and PosB with Ton/Toff timing.",
+  hAnalog:"Analog inputs", hAnalogT:"4 inputs measure 0–40V voltage, published periodically by the device over MQTT.",
+  hSim:"Simulator", hSimT:"Each device has its own operating mode (Settings → Mode): Local simulation writes state directly into the UI, Broker simulation sends/receives real MQTT messages, Real operation turns simulation off (real device only).",
+  hSettings:"Device settings", hSettingsT:"Add, edit or delete a device (name, 6-char ID, MQTT broker, operating mode). The device ID is the last 6 hex characters of the ESP32 MAC address.",
+  hOsc:"Oscilloscope", hOscT:"Shows all channels over time. Timebase sets the display window. In simulation modes data comes from the simulator; in real operation from the device (relays and servo as events, analog inputs as samples). Pinch to zoom, tap a point for its value.",
+  oscNoData:"No data.", oscTapHint:"Tap the graph for a point value", oscNow:"now",
+  oscStop:"Freeze", oscStart:"Resume", oscLive:"LIVE", oscFrozen:"FROZEN", oscPanHint:"Drag left/right to move through history",
+  oscWinInfo:"Window", oscPos:"Position", oscSamples:"samples back",
+  grpRelays:"Relays", grpServo:"Servo", grpAnalog:"Analog"
+}
+};
+function T(k){ return (I18N[LANG] && I18N[LANG][k]) || (I18N.sl[k]) || k; }
+
+function applyLang(id){
+  LANG = id; lsSetPlain('rs_lang', id);
+  document.documentElement.setAttribute('lang', id);
+  document.querySelectorAll('[data-i]').forEach(el=>{ el.textContent = T(el.getAttribute('data-i')); });
+  buildLangGrid();
+  renderAll();
+}
+function buildLangGrid(){
+  const box = document.getElementById('langGrid'); if(!box) return;
+  box.innerHTML = '';
+  LANGS.forEach(l=>{
+    const b = document.createElement('button');
+    b.type='button'; b.textContent=l.n;
+    b.setAttribute('aria-pressed', l.id===LANG ? 'true':'false');
+    b.onclick=()=>applyLang(l.id);
+    box.appendChild(b);
+  });
+}
+
+/* ============================================================
+   POMOČ
+   ============================================================ */
+const HELP_KEYS = ['hRelays','hServo','hAnalog','hOsc','hSim','hSettings'];
+function openHelp(which){
+  document.getElementById('hscrim').classList.add('show');
+  document.getElementById('helpSheet').classList.add('open');
+  const back = document.getElementById('helpBack');
+  const title = document.getElementById('helpTitle');
+  const body = document.getElementById('helpBody');
+  if(which==='index'){
+    back.hidden = true;
+    title.textContent = T('helpIdxTitle');
+    body.className = 'hidx';
+    body.innerHTML = '';
+    HELP_KEYS.forEach(k=>{
+      const b = document.createElement('button');
+      b.textContent = T(k);
+      b.onclick = ()=>openHelp(k);
+      body.appendChild(b);
+    });
+  } else {
+    back.hidden = false;
+    title.textContent = T(which);
+    body.className = '';
+    body.innerHTML = `<p>${T(which+'T')}</p>`;
+  }
+}
+function closeHelp(){
+  document.getElementById('hscrim').classList.remove('show');
+  document.getElementById('helpSheet').classList.remove('open');
+}
+
+/* ============================================================
+   DRAWER nastavitve
+   ============================================================ */
+function openDrawer(){
+  DRAFT = null; // svez osnutek iz trenutno shranjenega stanja
+  renderSettings();
+  buildLangGrid();
+  buildThemeGrid();
+  document.getElementById('scrim').classList.add('show');
+  document.getElementById('drawer').classList.add('open');
+}
+function closeDrawer(){
+  document.getElementById('scrim').classList.remove('show');
+  document.getElementById('drawer').classList.remove('open');
+}
+
+/* ============================================================
+   STANJE / SHRANJEVANJE
+   ============================================================ */
+function lsGet(k, def){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):def; }catch(e){ return def; } }
+function lsSet(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+
+let CFG = lsGet('rs_cfg', { sites: [], siteIdx: -1 });
+// migracija: obstojece naprave brez opMode dobijo privzeto "sim_local"
+CFG.sites.forEach(s=>{ if(!s.opMode) s.opMode='sim_local'; });
+function saveCfg(){ lsSet('rs_cfg', CFG); }
+
+let LIVE = {};
+let SIMS = lsGet('rs_sims', {}); // keyed by site.id
+function saveSims(){ lsSet('rs_sims', SIMS); }
+function ensureSim(id){
+  if(!SIMS[id]) SIMS[id] = {
+    rele:[
+      {mode:'static', state:false, ton:1, toff:1, phaseOn:true, last:0},
+      {mode:'static', state:false, ton:1, toff:1, phaseOn:true, last:0},
+      {mode:'static', state:false, ton:1, toff:1, phaseOn:true, last:0},
+      {mode:'static', state:false, ton:1, toff:1, phaseOn:true, last:0}
+    ],
+    binMode:false, binVal:0,
+    servo:[
+      {mode:'static', pos:0, posA:0, posB:255, ton:1, toff:1, rampMs:0, phase:'RAMP_A', phaseStart:0, rampFrom:0, target:0, last:0},
+      {mode:'static', pos:0, posA:0, posB:255, ton:1, toff:1, rampMs:0, phase:'RAMP_A', phaseStart:0, rampFrom:0, target:0, last:0}
+    ],
+    analog:{a1:0,a2:0,a3:0,a4:0},
+    binPeriod:1, binLast:0
+  };
+  if(SIMS[id].binPeriod===undefined) SIMS[id].binPeriod = 1; // migracija starih zapisov
+  SIMS[id].servo.forEach(sv=>{ // migracija na 4-fazni cikel z rampo
+    if(sv.rampMs===undefined) sv.rampMs = 0;
+    if(sv.phase===undefined) sv.phase = 'RAMP_A';
+    if(sv.phaseStart===undefined) sv.phaseStart = 0;
+    if(sv.rampFrom===undefined) sv.rampFrom = sv.pos||0;
+    if(sv.target===undefined) sv.target = sv.pos||0;
+  });
+  if(SIMS[id].binLast===undefined) SIMS[id].binLast = 0;
+  return SIMS[id];
+}
+
+// osciloskop - krozni buffer vzorcev na napravo (v pomnilniku, ne persistira)
+let OSCBUF = {}; // id -> [{t, analog:{}}]  (DD2: samo ADC vzorci)
+// Pri 20s oknu in gostem prometu (ADC + dogodki + interpolacija) je 3000
+// vzorcev lahko premalo - starejsi del okna bi se izrinil. 8000 pokrije
+// najsirse okno z rezervo.
+const OSC_MAX_SAMPLES = 30000;   // EE4
+// V1: vzorci prihajajo iz dveh virov z RAZLICNIM izracunom casovnega ziga -
+// ADC nazaj datiran (Date.now() - n*tbMs), interpolacija s trenutnim casom.
+// Ce jih le pripenjamo, buffer ni urejen po casu in krivulja dobi zareze.
+// Zato vstavljamo na pravo mesto (obicajno na konec - hitra pot).
+// EE7: prvi indeks z vzorcem/dogodkom, katerega t >= tMin. Buffer je urejen
+// po casu, zato binarno iskanje. Prej je vsak izris preletel CELOTEN buffer
+// (filter/forEach) - pri 30000 vnosih in 20 slikah/s je to 1.8M primerjav/s
+// za tri grafe, kar telefon opazno upocasni.
+function lowerBound(arr, tMin){
+  let lo = 0, hi = arr.length;
+  while(lo < hi){ const m = (lo+hi)>>1; if(arr[m].t < tMin) lo = m+1; else hi = m; }
+  return lo;
+}
+
+function pushOscSample(id, sample){
+  if(!OSCBUF[id]) OSCBUF[id] = [];
+  const buf = OSCBUF[id];
+  if(buf.length === 0 || sample.t >= buf[buf.length-1].t){
+    buf.push(sample);                     // hitra pot: nov vzorec je najnovejsi
+  } else {
+    let lo = 0, hi = buf.length;          // binarno iskanje mesta vstavitve
+    while(lo < hi){ const mid = (lo+hi)>>1; if(buf[mid].t <= sample.t) lo = mid+1; else hi = mid; }
+    buf.splice(lo, 0, sample);
+  }
+  if(buf.length > OSC_MAX_SAMPLES) buf.shift();
+}
+
+/* ============================================================
+   DEBUG LOG (zavihek Simulator) - krozni buffer 1000 vnosov,
+   VEDNO aktiven (ni potrebno posebej vklopiti). Zajema celotno pot:
+   MQTT connect/subscribe/publish/message, ukazni tok sendCommand->
+   applySimCommand->pushSimStateNow, dekodiranje scope/data, napake.
+   ============================================================ */
+let DEBUGLOG = [];
+const DEBUG_CAP = 5000;   // LL4: ~15 min pri ~6 vnosih/s
+function logDebug(msg, isErr){
+  const t = new Date();
+  const ts = String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')+':'+
+             String(t.getSeconds()).padStart(2,'0')+'.'+String(t.getMilliseconds()).padStart(3,'0');
+  DEBUGLOG.unshift({ts, msg, isErr:!!isErr});   // zbiranje tece VEDNO
+  if(DEBUGLOG.length > DEBUG_CAP) DEBUGLOG.length = DEBUG_CAP;
+  // LL2: izris se NE sprozi samodejno - vsebina se prikaze sele ob kliku na
+  // "Prikazi". Pri gostem prometu je izris ob vsakem vnosu drag, zgodovina
+  // pa se kljub temu zbira ves cas.
+}
+// LL2: rocni prikaz vsebine dnevnika
+function showDebugLog(){
+  const el = document.getElementById('debugLogBox');
+  if(!el) return;
+  renderDebugLog(el);
+  const info = document.getElementById('debugInfo');
+  if(info) info.textContent = `${DEBUGLOG.length} / ${DEBUG_CAP}`;
+}
+
+function renderDebugLog(el){
+  if(!el) return;
+  el.innerHTML = DEBUGLOG.map(e=>{
+    const line = `[${e.ts}] ${e.msg}`;
+    return e.isErr ? `<span class="err">${line}</span>` : line;
+  }).join('\n');
+}
+// Neblokirajoce obvestilo (nadomesca alert(), ki na mobilnem zamrzne UI)
+let _toastTo = null;
+function showToast(msg){
+  const el = document.getElementById('toast');
+  if(!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_toastTo);
+  _toastTo = setTimeout(()=>el.classList.remove('show'), 2600);
+}
+
+function clearDebugLog(){
+  DEBUGLOG = [];
+  const el = document.getElementById('debugLogBox');
+  if(el) el.innerHTML = '';
+}
+// O4: navigator.clipboard obstaja SAMO v varnem kontekstu (https/localhost).
+// Datoteka, odprta prek content:// ali file://, tega nima - zato rezervna
+// pot prek zacasnega <textarea> + execCommand('copy'), ki deluje povsod.
+function copyDebugLog(){
+  const text = DEBUGLOG.slice().reverse().map(e=>`[${e.ts}] ${e.msg}`).join('\n');
+  if(!text){ showToast(T('logEmpty')); return; }
+  const fallback = ()=>{
+    try{
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+      document.body.appendChild(ta);
+      ta.focus(); ta.select(); ta.setSelectionRange(0, text.length);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      showToast(ok ? T('logCopied') : T('logCopyFail'));
+    }catch(e){ showToast(T('logCopyFail')); }
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text)
+      .then(()=>showToast(T('logCopied')))
+      .catch(fallback);   // zavrnjeno dovoljenje -> rezervna pot
+  } else fallback();
+}
+
+/* ============================================================
+   MQTT
+   ============================================================ */
+let mqttClients = {};
+// JJ4: WS naslov ni vec trdo 8084. Zapis brokerja: "gostitelj[:tcpPort][|wsPort][|ws|wss]"
+// npr. "broker.emqx.io", "mojbroker.si:1883|9001|ws"
+// JJ12: cel niz ostane KLJUC za identifikacijo brokerja (mqttClients[broker]),
+// zato se dva razlicna zapisa istega gostitelja stejeta kot razlicna brokerja.
+function brokerWsUrl(broker){
+  const parts = String(broker).split('|');
+  const host = parts[0].split(':')[0].trim();
+  const wsPort = (parts[1] && parseInt(parts[1])) || 8084;
+  const scheme = (parts[2] || '').trim().toLowerCase() === 'ws' ? 'ws' : 'wss';
+  return `${scheme}://${host}:${wsPort}/mqtt`;
+}
+
+function getClient(broker){
+  if(mqttClients[broker]) return mqttClients[broker];
+  if(typeof mqtt === 'undefined'){ logDebug('MQTT: mqtt.js knjižnica ni na voljo (CDN nedosegljiv?)', true); console.warn('mqtt.js ni na voljo'); return null; }
+  try{
+    const url = brokerWsUrl(broker);
+    logDebug(`MQTT connect() poskus -> ${url}`);
+    // OBRATEN LWT: naprava mora vedeti, ali je NADZORNI KLIENT prisoten.
+    // Broker sam objavi "offline" na client/status ob nepricakovani prekinitvi.
+    // LWT velja za eno temo, zato ga vezemo na prvo napravo tega brokerja;
+    // prisotnost "online" pa aktivno objavimo za VSE naprave (glej publishClientPresence).
+    // JJ1: MQTT dovoli SAMO EN will na povezavo. Prej je bil vezan na prvo
+    // napravo, zato pri vec napravah druge niso dobile "offline" in njihov
+    // Offline Guard se ni sprozil. Zdaj skupna tema, ki jo poslusajo vse.
+    // TT2: keepalive 60s - povezava prezivi kratko ozadje brez ponovnega
+    // vzpostavljanja; reconnectPeriod ostane kratek za hitro obnovo.
+    const opts = { reconnectPeriod: 4000, keepalive: 60 };
+    opts.will = { topic: CLIENT_STATUS_TOPIC, payload:'offline', qos:1, retain:true };
+    const client = mqtt.connect(url, opts);
+    client.on('error', (err)=>{ logDebug(`MQTT ERROR (${broker}): ${err&&err.message}`, true); console.warn('MQTT napaka ('+broker+'):', err&&err.message); renderConnPill(); });
+    client.on('reconnect', ()=>{ logDebug(`MQTT reconnect poskus (${broker})`); });
+    client.on('connect', ()=>{ logDebug(`MQTT CONNECTED (${broker})`); renderConnPill(); resubscribeAll(broker); publishClientPresence(broker, true); });
+    client.on('close', ()=>{ logDebug(`MQTT CLOSED (${broker})`, true); renderConnPill(); });
+    client.on('offline', ()=>{ logDebug(`MQTT OFFLINE (${broker})`, true); });
+    client.on('message', (topic, payload)=>{
+      logDebug(`MQTT <- ${topic} (${payload.length}B)`);
+      onMqttMsg(topic, payload);
+    });
+    mqttClients[broker] = client;
+    return client;
+  }catch(e){ logDebug(`MQTT connect() izjema: ${e.message}`, true); console.warn('MQTT connect napaka:', e); return null; }
+}
+
+// Aktivno javi napravam, da je nadzorni klient prisoten (dopolnjuje LWT,
+// ki pokriva le nepricakovano prekinitev in samo eno temo).
+// JJ1: skupna tema za prisotnost nadzorne aplikacije
+const CLIENT_STATUS_TOPIC = 'nadzor/status';
+function publishClientPresence(broker, online){
+  const c = mqttClients[broker];
+  if(!c || !c.connected) return;
+  // JJ11: retain je nujen (nova naprava mora ob prijavi takoj izvedeti stanje),
+  // a pomeni, da zadnji "offline" ostane na brokerju - zato ob vsaki povezavi
+  // TAKOJ objavimo "online", da ga prepisemo.
+  c.publish(CLIENT_STATUS_TOPIC, online?'online':'offline', {qos:1, retain:true});
+  // zdruzljivost nazaj: se naprej javimo tudi po stari temi vsake naprave
+  CFG.sites.forEach(s=>{
+    if(s.mqtt!==broker) return;
+    c.publish(`naprava/${s.id}/client/status`, online?'online':'offline', {qos:1, retain:true});
+  });
+  // LL3: heartbeat je pogost (5s), zato ga zapisemo le ob SPREMEMBI stanja
+  if(publishClientPresence._last !== online){
+    publishClientPresence._last = online;
+    logDebug(`KLIENT -> ${CLIENT_STATUS_TOPIC} = ${online?'ONLINE':'OFFLINE'}`, !online);
+  }
+}
+// periodicna potrditev prisotnosti (heartbeat) - broker/naprava tako ve,
+// da je klient se vedno tu tudi po morebitnem re-connectu
+// JJ13: 5s (prej 20s) - pri spodnji meji timeouta 5s je Offline Guard
+// sicer sprozil izklop, ceprav je bil klient prisoten.
+setInterval(()=>{ Object.keys(mqttClients).forEach(b=>publishClientPresence(b, true)); }, 5000);
+
+function resubscribeAll(broker){
+  // SMER PODATKOV: HTML->ESP32 gredo samo ukazi (.../set, glej sendCommand()).
+  // Vse povratne informacije (stanje relejev/servo/analog) prihajajo
+  // IZKLJUCNO preko scope/data (binarni blok) - locenih "stanje" tem NI VEC.
+  CFG.sites.forEach(s=>{
+    if(s.mqtt===broker){
+      const c = mqttClients[broker];
+      c.subscribe(`naprava/${s.id}/status`); logDebug(`SUB naprava/${s.id}/status`);
+      c.subscribe(`naprava/${s.id}/scope/data`); logDebug(`SUB naprava/${s.id}/scope/data`);
+      c.subscribe(`naprava/${s.id}/config/stanje`); logDebug(`SUB naprava/${s.id}/config/stanje`);
+      ensureSimBrokerListening(s); // virtualna naprava posluša ukaze TAKOJ, ne šele ob Start
+    }
+  });
+}
+
+function ensureLive(id){
+  if(!LIVE[id]) LIVE[id] = { online:false, stale:true, lastSeen:0, rele:[false,false,false,false], binarno:0, binMode:false, servo:[0,0], analog:{},
+                             binOn:false, binPeriod:1, offlineGuard:false, bootRestore:false, cfgFromDevice:false };
+  return LIVE[id];
+}
+
+// V6 FORMAT: scope/data nosi SAMO ADC (8B/vzorec) - releji in servo
+// prihajajo kot DOGODKI na scope/event, kar mocno zmanjsa promet:
+//  - rele: samo ob preklopu {"t":"r","i":0-3,"v":0/1}
+//  - servo: samo ob zacetku rampe {"t":"s","i":0-1,"from":x,"to":y,"ms":trajanje}
+// Klient med dogodkoma sam interpolira (servo) oz. drzi raven nivo (rele).
+// glava 8B [u32 timebase_ms][u16 n][u16 rezerv], nato n x 8B: a1..a4 u16 LE (x0.1V)
+function encodeScopeBlock(samples, timebaseMs){
+  const n = samples.length;
+  const buf = new ArrayBuffer(8 + n*8);
+  const dv = new DataView(buf);
+  dv.setUint32(0, timebaseMs, true);
+  dv.setUint16(4, n, true);
+  dv.setUint16(6, 0, true);
+  let off = 8;
+  samples.forEach(s=>{
+    dv.setUint16(off,   Math.round((s.a1||0)*10), true);
+    dv.setUint16(off+2, Math.round((s.a2||0)*10), true);
+    dv.setUint16(off+4, Math.round((s.a3||0)*10), true);
+    dv.setUint16(off+6, Math.round((s.a4||0)*10), true);
+    off += 8;
+  });
+  return new Uint8Array(buf);
+}
+
+// Zadnje znano stanje relejev/servo po napravi (gradi se iz dogodkov).
+// Servo hrani tudi tekoco rampo, da lahko klient interpolira vmesne lege.
+// GG5: dogodkovni model (EVSTATE/EVLOG/handleScopeEvent/relayStateAt/
+// servoPosAt/pushEvent) ODSTRANJEN - vse prihaja v enotnem 19B zapisu v
+// en sam buffer (OSCBUF), zato ni vec dveh virov, ki bi si nasprotovala.
+
+
+// scope/data zdaj nosi SAMO ADC vzorce.
+// GG1: ENOTEN 19B zapis - releji, servo IN adc v istem vzorcu, po eni poti.
+// glava 8B [u32 timebase_ms][u16 n][u16 rezerv], nato n x 19B:
+//   [id u32][tm u32][relBits u8][s1 u8][s2 u8][a1..a4 u16 LE]
+// tm je millis() NAPRAVE - vzorce umestimo po njem, zato zakasnitev omrezja
+// ne premika vec stopnic.
+let CLOCK_OFF = {};   // id -> odmik (Date.now() - millis naprave)
+// SS1/SS2: odmik ure po NAJMANJSI opazeni zakasnitvi.
+// Prej se je odmik popravljal z 2% ob VSAKEM zapisu, `Date.now()` pa je cas
+// PRISPETJA, ki niha z zakasnitvijo omrezja (150-400ms). Odmik se je zato
+// nenehno premikal in z njim CELOTNA casovna os - od tod skakanje robov,
+// ceprav so preklopi na napravi natanko doloceni.
+// Najmanjsa opazena razlika (Date.now()-tm) ustreza prenosu z najmanjso
+// zakasnitvijo in je najboljsa ocena pravega odmika (standardni postopek
+// pri sinhronizaciji ur).
+let CLOCK_MIN = {};    // najmanjsa opazena razlika v tekocem oknu
+let CLOCK_N   = {};    // stevec zapisov v oknu
+let CLOCK_LAST = {};   // zadnja opazena razlika (za diagnostiko)
+function deviceTime(devId, tm){
+  const diff = Date.now() - tm;
+  CLOCK_LAST[devId] = diff;
+  if(CLOCK_OFF[devId] === undefined){
+    CLOCK_OFF[devId] = diff; CLOCK_MIN[devId] = diff; CLOCK_N[devId] = 0;
+  } else {
+    if(CLOCK_MIN[devId] === undefined || diff < CLOCK_MIN[devId]) CLOCK_MIN[devId] = diff;
+    // SS2: navzdol TAKOJ (nasli smo hitrejsi prenos = boljso oceno)
+    if(diff < CLOCK_OFF[devId]) CLOCK_OFF[devId] = diff;
+    // navzgor zelo pocasi - ura ESP32 drsi le nekaj ppm (~1ms na 15 min).
+    // Okno 200 zapisov: ce je najmanjsa v oknu vecja od trenutnega odmika,
+    // se je ura res premaknila -> popravimo za majhen korak.
+    if(++CLOCK_N[devId] >= 200){
+      if(CLOCK_MIN[devId] > CLOCK_OFF[devId]) CLOCK_OFF[devId] += 1;
+      CLOCK_MIN[devId] = diff; CLOCK_N[devId] = 0;
+    }
+  }
+  return tm + CLOCK_OFF[devId];
+}
+
+let LAST_REC_ID = {};   // zaznavanje izgubljenih zapisov
+let TB_MISMATCH = {};   // PP1: od kdaj se javljena baza ne ujema z izbrano
+
+function decodeScopeBlock(id, arrBuf){
+  try{
+    const dv = new DataView(arrBuf);
+    if(dv.byteLength < 8) return;
+    const tbMs = dv.getUint32(0, true) || 1;
+    const n = dv.getUint16(4, true);
+    const L = ensureLive(id);
+    let off = 8, last = null;
+    for(let i=0;i<n;i++){
+      if(off+19 > dv.byteLength) break;
+      const recId = dv.getUint32(off, true);
+      const tm    = dv.getUint32(off+4, true);
+      const rb    = dv.getUint8(off+8);
+      const s1    = dv.getUint8(off+9), s2 = dv.getUint8(off+10);
+      const sample = {
+        t: deviceTime(id, tm),
+        rele: [!!(rb&1), !!(rb&2), !!(rb&4), !!(rb&8)],
+        servo: [s1, s2],
+        analog: { a1: dv.getUint16(off+11,true)/10, a2: dv.getUint16(off+13,true)/10,
+                  a3: dv.getUint16(off+15,true)/10, a4: dv.getUint16(off+17,true)/10 }
+      };
+      // zaznaj izgubljene zapise (ID je zaporeden)
+      // MM3: skok NAPREJ = prava izguba; skok NAZAJ pomeni drug vir na isti
+      // temi (druga odprta seja, stari retain zapis) - to ni izguba in bi
+      // sicer javljalo lazne "izgubljenih 744 zapisov".
+      if(LAST_REC_ID[id] !== undefined){
+        if(recId > LAST_REC_ID[id] + 1){
+          logDebug(`scope ${id}: izgubljenih ${recId - LAST_REC_ID[id] - 1} zapisov (${LAST_REC_ID[id]} -> ${recId})`, true);
+        } else if(recId <= LAST_REC_ID[id]){
+          logDebug(`scope ${id}: ID je SKOCIL NAZAJ (${LAST_REC_ID[id]} -> ${recId}) - `
+                 + `na isti temi objavlja se en vir (druga odprta seja ali star retain zapis)`, true);
+        }
+      }
+      LAST_REC_ID[id] = recId;
+      if(i === 0){
+        // PP1/PP3: naprava javlja DEJANSKO vzorcevalno bazo. Ce se ne ujema
+        // z izbrano dlje kot 5s, scope/set ni prisel skozi -> ponovimo ga.
+        // Prej se je ukaz poslal le ob odprtju zavihka in ob menjavi baze;
+        // ce se je izgubil, je naprava ostala v pocasnem nacinu (1 zapis/s)
+        // in graf pri 1ms/10ms bazi je bil prakticno prazen.
+        const site = CFG.sites.find(x=>x.id===id);
+        if(site && site.opMode === 'real' && currentTab === 'osciloskop'){
+          const want = OSC_TIMEBASE;
+          const mismatch = Math.abs(tbMs - want) > Math.max(2, want*0.5);
+          if(mismatch){
+            if(!TB_MISMATCH[id]) TB_MISMATCH[id] = Date.now();
+            else if(Date.now() - TB_MISMATCH[id] > 5000){
+              TB_MISMATCH[id] = Date.now();
+              logDebug(`OSC ${id}: naprava vzorci na ${tbMs}ms, izbrano ${want}ms `
+                     + `- ponovno posiljam scope/set`, true);
+              sendCommand(site, 'scope/set', { timebase_ms: want });
+            }
+          } else TB_MISMATCH[id] = 0;
+        }
+        // LL3: diagnostika prvega zapisa v bloku
+        const hz = tbMs > 0 ? (1000/tbMs).toFixed(1) : '?';
+        logDebug(`REC ${id}: id=${recId} millis=${tm} odmik=${Math.round(CLOCK_OFF[id])}ms `
+               + `dejansko=${tbMs}ms (${hz}Hz) zakasnitev=${CLOCK_LAST[id]}ms `
+               + `rele=${sample.rele.map(b=>b?1:0).join('')} servo=${s1},${s2} `
+               + `adc=${sample.analog.a1.toFixed(1)}/${sample.analog.a2.toFixed(1)}/`
+               + `${sample.analog.a3.toFixed(1)}/${sample.analog.a4.toFixed(1)} `
+               + `n=${n} tb=${tbMs}ms buf=${(OSCBUF[id]||[]).length}`);
+      }
+      pushOscSample(id, sample);
+      last = sample;
+      off += 19;
+    }
+    if(last){
+      L.online = true; L.stale = false; L.lastSeen = Date.now();
+      L.rele = last.rele.slice(); L.servo = last.servo.slice(); L.analog = last.analog;
+    }
+    renderSiteMenu(); renderConnPill();
+    if(currentTab==='nadzor') updateNadzorState();
+  }catch(e){ logDebug(`decodeScopeBlock ${id}: ${e.message}`, true); }
+}
+
+function onMqttMsg(topic, payload){
+  const m = topic.match(/^naprava\/([0-9A-Fa-f]{6})\/(.+)$/);
+  if(!m){ logDebug(`onMqttMsg: tema ne ustreza vzorcu naprava/ID/... : ${topic}`, true); return; }
+  const id = m[1].toUpperCase(), sub = m[2];
+
+  if(sub==='scope/data'){
+    const buf = payload.buffer ? payload.buffer.slice(payload.byteOffset, payload.byteOffset+payload.byteLength) : payload;
+    decodeScopeBlock(id, buf);
+    return;
+  }
+  if(sub==='status'){
+    const L = ensureLive(id);
+    L.lastSeen = Date.now(); L.stale = false;
+    const wasOnline = L.online;
+    L.online = (payload.toString()==='online');
+    if(wasOnline !== L.online)
+      logDebug(`STATUS ${id}: ${wasOnline?'online':'offline'} -> ${L.online?'ONLINE':'OFFLINE'}`, !L.online);
+    renderSiteMenu(); renderConnPill();
+  }
+  if(sub==='config/stanje'){
+    // NAPRAVA JE VIR RESNICE za nastavitvi nacinov - klient jih ob online prevzame.
+    try{
+      const d = JSON.parse(payload.toString());
+      const L = ensureLive(id);
+      if(d.offlineGuard!==undefined) L.offlineGuard = !!d.offlineGuard;
+      if(d.bootRestore!==undefined)  L.bootRestore  = !!d.bootRestore;
+      if(d.offlineTimeoutS!==undefined) L.offlineTimeoutS = d.offlineTimeoutS;
+      // legi OFF/ON sta shranjeni na napravi -> prevzemi ju v UICMD, da sta
+      // znani tudi ob dostopu z drugega telefona (F5)
+      if(Array.isArray(d.posOff) || Array.isArray(d.posOn)){
+        const uc = ensureUICmd(id);
+        for(let i=0;i<2;i++){
+          if(Array.isArray(d.posOff) && d.posOff[i]!==undefined) uc.servo[i].posOff = d.posOff[i];
+          if(Array.isArray(d.posOn)  && d.posOn[i]!==undefined)  uc.servo[i].posOn  = d.posOn[i];
+        }
+        saveUICmd();
+      }
+      if(d.binOn!==undefined)        L.binOn        = !!d.binOn;
+      if(d.binPeriod!==undefined)    L.binPeriod    = d.binPeriod;
+      L.cfgFromDevice = true;
+      logDebug(`CONFIG ${id}: offlineGuard=${L.offlineGuard} timeout=${L.offlineTimeoutS||60}s `
+             + `bootRestore=${L.bootRestore} binOn=${L.binOn} binPeriod=${L.binPeriod}s`);
+      if(currentTab==='nadzor') renderNadzorControls(); // binOn spremeni zaklep rele kartic
+      renderSettings();
+    }catch(e){ logDebug(`CONFIG ${id}: napaka parsanja: ${e.message}`, true); }
+  }
+}
+
+// SMER: HTML -> ESP32 (ukazi). sim_local nima MQTT ozadja - ukaz se
+// izvrsi direktno na virtualni napravi (glej applySimCommand).
+// JJ6: QoS 0 je hiter (brez cakanja na PUBACK), a brez jamstva dostave.
+// Zato po 500ms preverimo, ali je naprava javila PRICAKOVANO stanje; ce ne,
+// ukaz enkrat ponovimo. Velja le za ROCNE ukaze - pri utripanju/nihanju
+// enoznacnega ciljnega stanja ni.
+const PENDING = {};   // kljuc -> {expect, tries, timer}
+function expectAfterCommand(site, subtopic, obj){
+  let check = null;
+  const relM = subtopic.match(/^rele\/(\d)\/set$/);
+  const srvM = subtopic.match(/^servo\/(\d)\/set$/);
+  if(relM && obj.mode === 'static'){
+    const i = parseInt(relM[1])-1;
+    check = ()=> !!ensureLive(site.id).rele[i] === !!obj.state;
+  } else if(srvM && obj.mode === 'static'){
+    const i = parseInt(srvM[1])-1;
+    check = ()=> Math.abs((ensureLive(site.id).servo[i]||0) - (obj.pos||0)) <= 2;
+  } else if(subtopic === 'binarno/set'){
+    check = ()=> !!ensureLive(site.id).binOn === !!obj.on;
+  }
+  if(!check) return;   // periodicni ukazi - brez preverjanja
+
+  const key = site.id + '/' + subtopic;
+  if(PENDING[key]) clearTimeout(PENDING[key].timer);
+  const tries = (PENDING[key] ? PENDING[key].tries : 0) + 1;
+  PENDING[key] = { tries, timer: setTimeout(()=>{
+    if(check()){ logDebug(`UKAZ ${subtopic}: potrjen`); delete PENDING[key]; return; }
+    if(tries < 2){
+      logDebug(`UKAZ ${subtopic}: NI potrjen po 500ms - ponavljam (${tries}/2)`, true);
+      sendCommand(site, subtopic, obj);
+    } else {
+      delete PENDING[key];
+      logDebug(`UKAZ ${subtopic}: NI POTRJEN po 2 poskusih - naprava se ne odziva`, true);
+      showToast(T('cmdFailed'));
+    }
+  }, 500) };
+}
+
+function sendCommand(site, subtopic, obj){
+  logDebug(`sendCommand naprava/${site.id}/${subtopic} ${JSON.stringify(obj)} [opMode=${site.opMode}]`);
+  if(site.opMode==='sim_local'){
+    applySimCommand(site, subtopic, obj); // ta zdaj ze sam poklice pushSimStateNow() -> updateNadzorState()
+    return;
+  }
+  const c = getClient(site.mqtt);
+  if(!c){ logDebug(`sendCommand: NI MQTT klienta (${site.mqtt}) - ukaz ZAVRZEN`, true); showToast(T('alertNoMqtt')); return; }
+  if(!c.connected){ logDebug(`sendCommand: MQTT klient obstaja a NI povezan (connected=false) - publish bo morda zavrzen/zamujen`, true); }
+  const payload = JSON.stringify(obj);
+  // GG11: QoS 0 - QoS 1 je cakal na PUBACK brokerja, kar je pri javnem
+  // brokerju prek WebSocketa dodalo cel obhod pred dostavo napravi.
+  // Ukaz je majhen; ob izgubi ga popravi naslednje stanje iz naprave.
+  c.publish(`naprava/${site.id}/${subtopic}`, payload, {qos:0});
+  expectAfterCommand(site, subtopic, obj);   // JJ6
+  logDebug(`PUB -> naprava/${site.id}/${subtopic} (${payload.length}B) qos1`);
+}
+
+setInterval(()=>{
+  let changed=false;
+  Object.keys(LIVE).forEach(id=>{
+    const L=LIVE[id];
+    if(!L.stale && Date.now()-L.lastSeen>30000){ L.stale=true; changed=true; }
+  });
+  if(changed){ renderSiteMenu(); renderConnPill(); if(currentTab==='nadzor') updateNadzorState(); }
+}, 5000);
+
+function connectAll(){
+  const brokers = [...new Set(CFG.sites.map(s=>s.mqtt).filter(Boolean))];
+  brokers.forEach(b=>{ try{ getClient(b); }catch(e){ console.warn('connectAll napaka:', e); } });
+  // ce je broker ze bil povezan prej (npr. druga naprava na istem brokerju),
+  // 'connect' dogodek se ne bo znova sprozil - zato tudi tu eksplicitno
+  // poskrbimo, da vsaka sim_broker naprava posluza svoje ukazne teme.
+  CFG.sites.forEach(s=>{ if(s.opMode==='sim_broker') ensureSimBrokerListening(s); });
+}
+
+/* ============================================================
+   GLAVA
+   ============================================================ */
+function currentSite(){ return CFG.sites[CFG.siteIdx] || null; }
+
+// OO1: siteIdx se je doslej nastavil SAMO ob zagonu strani in ob rocnem
+// preklopu v spustnem seznamu - ta pa se prikaze sele pri dveh napravah.
+// Ko si dodal PRVO napravo, je siteIdx ostal -1 in glava je pisala
+// "Ni naprave", ceprav je bila naprava shranjena. Enako po brisanju
+// aktivne naprave, ko je indeks kazal na neobstojec vnos.
+function fixSiteIdx(){
+  if(CFG.sites.length === 0){ CFG.siteIdx = -1; return; }
+  if(CFG.siteIdx < 0) CFG.siteIdx = 0;
+  else if(CFG.siteIdx >= CFG.sites.length) CFG.siteIdx = CFG.sites.length - 1;
+}
+
+function toggleSiteMenu(){
+  if(CFG.sites.length<=1) return;
+  const open = document.getElementById('siteMenu').classList.toggle('open');
+  document.getElementById('headbox').setAttribute('data-open', open ? '1':'0');
+}
+
+function opModeLabel(m){
+  if(m==='sim_local') return T('opSimLocal');
+  if(m==='sim_broker') return T('opSimBroker');
+  return T('opReal');
+}
+
+function renderSiteMenu(){
+  const s = currentSite();
+  document.getElementById('siteName').textContent = s ? s.name : T('noDevice');
+  document.getElementById('headbox').setAttribute('data-multi', CFG.sites.length>1 ? '1':'0');
+  document.getElementById('opModeTag').textContent = s ? opModeLabel(s.opMode) : '';
+  const vt = document.getElementById('verTag'); if(vt) vt.textContent = APP_VERSION;
+  setTimeout(syncTopHeight, 0); // vrstica z nacinom vpliva na visino glave
+
+  const box = document.getElementById('siteMenu');
+  box.innerHTML = '';
+  CFG.sites.forEach((site, i)=>{
+    const L = ensureLive(site.id);
+    const row = document.createElement('div');
+    row.className = 'row' + (i===CFG.siteIdx ? ' cur' : '');
+    const bits = L.rele.map(b=>`<span class="${b?'on':''}"></span>`).join('');
+    row.innerHTML = `<div><div>${site.name}</div><small>${site.id} · ${opModeLabel(site.opMode)}</small></div><div class="relbits">${bits}</div>`;
+    row.onclick = (e)=>{ e.stopPropagation(); CFG.siteIdx=i; saveCfg(); document.getElementById('siteMenu').classList.remove('open'); renderTabs(); renderAll(); syncDeviceToUI(CFG.sites[i]); };
+    box.appendChild(row);
+  });
+}
+
+// Enotna definicija "naprava je online" - uporabljena tudi za zaklep kontrol.
+function isDeviceOnline(){
+  const s = currentSite(); if(!s) return false;
+  const L = ensureLive(s.id);
+  return !!L.online && !L.stale;
+}
+
+// Poenostavljeno na DVE stanji: dokler ni potrjeno online, vedno OFFLINE.
+// KK3: klik na znacko sprozi ponovno povezavo (vidneje od gumba Uporabi)
+// ============================================================
+// TT: DELOVANJE V OZADJU
+// Brskalnik na Androidu zavihek v ozadju zadusi: casovniki se upocasnijo na
+// ~1x/min, po nekaj minutah se stran lahko zamrzne ali odstrani iz pomnilnika.
+// Tega z JavaScriptom ni mogoce povsem zaobiti. Kar naredimo:
+//  TT2 - povezavo drzimo pri zivljenju (keepalive), da se ob vrnitvi ni treba
+//        znova povezovati
+//  TT3 - ob vrnitvi v ospredje takoj preverimo povezavo in prerisemo graf
+//  TT4 - Wake Lock: dokler je zaslon prizgan in aplikacija odprta, prepreci
+//        uspavanje (edina zanesljiva pot; telefon mora ostati odklenjen)
+// Za DOLGE teste ostaja zanesljiva pot: Offline Guard IZKLOPLJEN - naprava
+// dela avtonomno, telefon podatke pobere ob vrnitvi.
+// ============================================================
+let _wakeLock = null;
+async function requestWakeLock(){
+  try{
+    if(!('wakeLock' in navigator)) return;
+    _wakeLock = await navigator.wakeLock.request('screen');
+    _wakeLock.addEventListener('release', ()=>logDebug('WakeLock: sproscen'));
+    logDebug('WakeLock: aktiven (zaslon ne bo ugasnil)');
+  }catch(e){ logDebug(`WakeLock ni na voljo: ${e.message}`, true); }
+}
+
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden){
+    logDebug('APP: v ozadju - izris ustavljen, sprejem podatkov tece naprej');
+    return;
+  }
+  logDebug('APP: nazaj v ospredju');
+  requestWakeLock();                       // TT4: wake lock se ob skritju sprosti
+  // TT3: povezavo lahko brskalnik med tem prekine - preveri in po potrebi obnovi
+  Object.keys(mqttClients).forEach(b=>{
+    const c = mqttClients[b];
+    if(c && !c.connected){
+      logDebug(`APP: povezava ${b} prekinjena med ozadjem - obnavljam`, true);
+      try{ c.reconnect(); }catch(e){}
+    }
+  });
+  Object.keys(mqttClients).forEach(b=>publishClientPresence(b, true));
+  if(currentTab==='osciloskop') renderOscFull();
+  if(currentTab==='nadzor') updateNadzorState();
+});
+
+function reconnectNow(){
+  if(isDeviceOnline()) return;
+  logDebug('KK3: rocna zahteva za ponovno povezavo');
+  Object.keys(mqttClients).forEach(b=>{ try{ mqttClients[b].end(true); }catch(e){} });
+  mqttClients = {}; simBrokerListening = new Set();
+  connectAll();
+  showToast(T('reconnecting'));
+}
+
+function renderConnPill(){
+  const s = currentSite();
+  const pill = document.getElementById('connPill');
+  const txt = document.getElementById('connPillTxt');
+  if(!s){ txt.textContent=T('stNone'); pill.className='pill'; return; }
+  if(isDeviceOnline()){ txt.textContent=T('stOnline'); pill.className='pill on'; }
+  else{ txt.textContent=T('stOffline'); pill.className='pill off'; }
+}
+
+/* ============================================================
+   ZAVIHKI - dinamicno glede na opMode izbrane naprave
+   ============================================================ */
+let currentTab = 'nadzor';
+function tabsForSite(){
+  const s = currentSite();
+  // vrstni red: Nadzor -> Osciloskop -> Simulator
+  // Simulator je skrit, kadar naprava tece v nacinu Realno delovanje.
+  const tabs = [{k:'nadzor', label:T('tabControl')}, {k:'osciloskop', label:T('tabOsc')}];
+  if(!s || s.opMode!=='real') tabs.push({k:'simulator', label:T('tabSim')});
+  return tabs;
+}
+function renderTabs(){
+  const tabs = tabsForSite();
+  setTimeout(syncTopHeight, 0); // po izrisu zavihkov osvezi visino glave
+  if(!tabs.find(t=>t.k===currentTab)) currentTab = 'nadzor';
+  const bar = document.getElementById('tabsBar');
+  bar.innerHTML = '';
+  tabs.forEach(t=>{
+    const b = document.createElement('button');
+    b.textContent = t.label;
+    b.setAttribute('aria-selected', t.k===currentTab ? 'true':'false');
+    b.onclick = ()=>switchTab(t.k);
+    bar.appendChild(b);
+  });
+  document.getElementById('tab-nadzor').classList.toggle('show', currentTab==='nadzor');
+  document.getElementById('tab-simulator').classList.toggle('show', currentTab==='simulator');
+  document.getElementById('tab-osciloskop').classList.toggle('show', currentTab==='osciloskop');
+}
+function switchTab(t){
+  currentTab = t;
+  renderTabs();
+  if(t==='nadzor') renderNadzorControls();
+  if(t==='simulator') renderSimulatorControls();
+  if(t==='osciloskop'){
+    renderOscFull();
+    const st = currentSite();   // DD6: takoj zahtevaj izbrano casovno bazo
+    if(st && st.opMode === 'real') sendCommand(st, 'scope/set', { timebase_ms: OSC_TIMEBASE });
+  }
+}
+
+/* ============================================================
+   ZLOŽLJIVE SEKCIJE (accordion)
+   ============================================================ */
+let SECTIONS = lsGet('rs_sections', { releji:false, servo:false, analog:false });
+function saveSections(){ lsSet('rs_sections', SECTIONS); }
+function cardHtml(key, title, helpKey, bodyHtml){
+  const collapsed = SECTIONS[key] ? 'collapsed' : '';
+  const chevOpen = SECTIONS[key] ? '' : 'open';
+  return `<div class="card">
+    <div class="chead" onclick="toggleSection('${key}')">
+      <h3>${title}</h3>
+      <button class="hb" onclick="event.stopPropagation();openHelp('${helpKey}')"></button>
+      <span class="chev ${chevOpen}">▾</span>
+    </div>
+    <div class="cbody ${collapsed}" id="cbody-${key}">${bodyHtml}</div>
+  </div>`;
+}
+function toggleSection(key){
+  SECTIONS[key] = !SECTIONS[key];
+  saveSections();
+
+  const body = document.getElementById('cbody-'+key);
+  const chev = body.parentElement.querySelector('.chev');
+  body.classList.toggle('collapsed', SECTIONS[key]);
+  chev.classList.toggle('open', !SECTIONS[key]);
+}
+
+/* ============================================================
+   ZAVIHEK: NADZOR
+   POMEMBNA ARHITEKTURNA LOCITEV (popravek napake - polje/select se
+   je prej zaprlo takoj ob dotiku, ker je periodicen prihod podatkov
+   sprozil poln innerHTML rebuild):
+   - renderNadzorControls() gradi UREJEVALNE kontrole (kartice,
+     gumbi, polja) in se klice SAMO ob menjavi zavihka/naprave/jezika.
+   - updateNadzorState() periodicno osvezuje SAMO prikaz trenutnega
+     stanja (badge-i, analogne vrednosti) preko direktnega DOM zapisa
+     (textContent/classList) - NIKOLI ne pokliče innerHTML na kontrolah.
+   ============================================================ */
+const STEP_VALUES = [0.5,1,2,5,10,20,30,50];
+let relUIMode = {0:'manual',1:'manual',2:'manual',3:'manual'};
+let srvUIMode = {0:'manual',1:'manual'};
+
+// Trajno shranjeno "zadnje poslano stanje" vsakega releja/servota, per
+// naprava - popravek: kartice so se prej ob vsakem izrisu (npr. vrnitev
+// iz Osciloskopa) resetirale na trdo kodirane privzete vrednosti namesto
+// da bi pokazale dejansko zadnje stanje.
+let UICMD = lsGet('rs_uicmd', {});
+function saveUICmd(){ lsSet('rs_uicmd', UICMD); }
+function ensureUICmd(id){
+  if(!UICMD[id]) UICMD[id] = {
+    rele: [0,1,2,3].map(()=>({mode:'manual', on:false, ton:1, toff:1})),
+    servo: [0,1].map(()=>({mode:'manual', on:false, posOff:0, posOn:255, pos:0, rampMs:0, posA:0, posB:255, ton:1, toff:1, rampMsP:0}))
+  };
+  UICMD[id].servo.forEach(sv=>{ // migracija starejsih zapisov
+    if(sv.on===undefined) sv.on=false;
+    if(sv.posOff===undefined) sv.posOff=0;
+    if(sv.posOn===undefined) sv.posOn=255;
+  });
+  return UICMD[id];
+}
+
+function nearestStepIdx(v){
+  let bi=0, bd=Infinity;
+  STEP_VALUES.forEach((sv,i)=>{ const d=Math.abs(sv-v); if(d<bd){bd=d; bi=i;} });
+  return bi;
+}
+
+function relayCardHtml(i, r){
+  const mAct = r.mode==='manual' ? 'active':'', pAct = r.mode==='period' ? 'active':'';
+  const onCls = r.on ? 'on':'off', onTxt = r.on ? T('lblOn') : T('lblOff');
+  return `<div class="unit-card" id="relayCard${i}">
+    <div class="uc-head"><span class="nm">${T('relayN')} ${i+1}</span></div>
+    <div class="mtog">
+      <button class="${mAct}" data-m="manual" onclick="setRelMode(${i},'manual')">${T('optManual')}</button>
+      <button class="${pAct}" data-m="period" onclick="setRelMode(${i},'period')">${T('optPeriod')}</button>
+    </div>
+    <div id="relManual${i}" style="display:${r.mode==='manual'?'block':'none'}">
+      <button class="onoff-btn ${onCls}" id="relOnOff${i}" onclick="toggleRelOnOff(${i})">${onTxt}</button>
+    </div>
+    <div id="relPeriod${i}" style="display:${r.mode==='period'?'block':'none'}">
+      <div class="tblock"><div class="trow">
+        <label>${T('lblTonL')}</label>
+        <input type="number" inputmode="decimal" id="relTon${i}" value="${r.ton}" min="0.1" max="50" step="0.1" onclick="this.select()" onfocus="this.select()"
+               onchange="syncStepSlider('relTon${i}','relTonSl${i}'); sendRelay(${i});">
+      </div><input type="range" class="stepslider" id="relTonSl${i}" min="0" max="7" value="${nearestStepIdx(r.ton)}"
+             oninput="stepSliderChange('relTon${i}', this.value)" onchange="sendRelay(${i})"></div>
+      <div class="tblock"><div class="trow">
+        <label>${T('lblToffL')}</label>
+        <input type="number" inputmode="decimal" id="relToff${i}" value="${r.toff}" min="0.1" max="50" step="0.1" onclick="this.select()" onfocus="this.select()"
+               onchange="syncStepSlider('relToff${i}','relToffSl${i}'); sendRelay(${i});">
+      </div><input type="range" class="stepslider" id="relToffSl${i}" min="0" max="7" value="${nearestStepIdx(r.toff)}"
+             oninput="stepSliderChange('relToff${i}', this.value)" onchange="sendRelay(${i})"></div>
+    </div>
+  </div>`;
+}
+
+function servoCardHtml(i, sv){
+  const mAct = sv.mode==='manual' ? 'active':'', pAct = sv.mode==='period' ? 'active':'';
+  return `<div class="unit-card" id="servoCard${i}">
+    <div class="uc-head"><span class="nm">${T('servoN')} ${i+1}</span></div>
+    <div class="mtog">
+      <button class="${mAct}" data-m="manual" onclick="setSrvMode(${i},'manual')">${T('optManual')}</button>
+      <button class="${pAct}" data-m="period" onclick="setSrvMode(${i},'period')">${T('optPeriod')}</button>
+    </div>
+    <div id="srvManual${i}" style="display:${sv.mode==='manual'?'block':'none'}">
+      <button class="onoff-btn ${sv.on?'on':'off'}" id="srvOnOff${i}" onclick="toggleSrvOnOff(${i})">${sv.on?T('lblOn'):T('lblOff')}</button>
+      <div class="pos-row" style="margin-top:8px"><label>${T('lblPosOff')}</label><input type="number" inputmode="decimal" id="srvPosOff${i}" min="0" max="255" value="${sv.posOff}" onclick="this.select()">
+        <label>${T('lblPosOn')}</label><input type="number" inputmode="decimal" id="srvPosOn${i}" min="0" max="255" value="${sv.posOn}" onclick="this.select()"></div>
+      <div class="pos-row"><label>${T('lblRampMs')}</label><input type="number" inputmode="decimal" id="srvRampM${i}" min="0" max="10000" step="50" value="${sv.rampMs}" onclick="this.select()"></div>
+      <p class="small">${T('srvApplyHint')}</p>
+    </div>
+    <div id="srvPeriod${i}" style="display:${sv.mode==='period'?'block':'none'}">
+      <div class="pos-row"><label>${T('lblPosA')}</label><input type="number" inputmode="decimal" id="srvPosA${i}" min="0" max="255" value="${sv.posA}" onclick="this.select()" onchange="sendServo(${i})">
+        <label>${T('lblPosB')}</label><input type="number" inputmode="decimal" id="srvPosB${i}" min="0" max="255" value="${sv.posB}" onclick="this.select()" onchange="sendServo(${i})"></div>
+      <div class="tblock"><div class="trow">
+        <label>${T('lblTonL')}</label>
+        <input type="number" inputmode="decimal" id="srvTon${i}" value="${sv.ton}" min="0.1" max="50" step="0.1" onclick="this.select()" onfocus="this.select()"
+               onchange="syncStepSlider('srvTon${i}','srvTonSl${i}'); sendServo(${i});">
+      </div><input type="range" class="stepslider" id="srvTonSl${i}" min="0" max="7" value="${nearestStepIdx(sv.ton)}"
+             oninput="stepSliderChange('srvTon${i}', this.value)" onchange="sendServo(${i})"></div>
+      <div class="tblock"><div class="trow">
+        <label>${T('lblToffL')}</label>
+        <input type="number" inputmode="decimal" id="srvToff${i}" value="${sv.toff}" min="0.1" max="50" step="0.1" onclick="this.select()" onfocus="this.select()"
+               onchange="syncStepSlider('srvToff${i}','srvToffSl${i}'); sendServo(${i});">
+      </div><input type="range" class="stepslider" id="srvToffSl${i}" min="0" max="7" value="${nearestStepIdx(sv.toff)}"
+             oninput="stepSliderChange('srvToff${i}', this.value)" onchange="sendServo(${i})"></div>
+      <div class="pos-row"><label>${T('lblRampMs')}</label><input type="number" inputmode="decimal" id="srvRampP${i}" min="0" max="10000" step="50" value="${sv.rampMsP}" onclick="this.select()" onchange="sendServo(${i})"></div>
+    </div>
+  </div>`;
+}
+
+function stepSliderChange(fieldId, idx){
+  document.getElementById(fieldId).value = STEP_VALUES[parseInt(idx)];
+}
+function syncStepSlider(fieldId, sliderId){
+  const v = parseFloat(document.getElementById(fieldId).value)||1;
+  document.getElementById(sliderId).value = nearestStepIdx(v);
+}
+// Gumb "Poslji" je ukinjen - vsaka sprememba (klik ON/OFF, sprememba
+// Ton/Toff/pozicije, preklop Rocno/Perioda) se poslje takoj IN se shrani
+// v UICMD, da se ob naslednjem izrisu kartice pravilno obnovi.
+function setRelMode(i,m){
+  relUIMode[i]=m;
+  document.querySelectorAll(`#relayCard${i} .mtog button`).forEach(b=>b.classList.toggle('active', b.dataset.m===m));
+  document.getElementById('relManual'+i).style.display = m==='manual' ? 'block':'none';
+  document.getElementById('relPeriod'+i).style.display = m==='period' ? 'block':'none';
+  sendRelay(i);
+}
+function setSrvMode(i,m){
+  srvUIMode[i]=m;
+  document.querySelectorAll(`#servoCard${i} .mtog button`).forEach(b=>b.classList.toggle('active', b.dataset.m===m));
+  document.getElementById('srvManual'+i).style.display = m==='manual' ? 'block':'none';
+  document.getElementById('srvPeriod'+i).style.display = m==='period' ? 'block':'none';
+  sendServo(i);
+}
+function toggleRelOnOff(i){
+  const btn = document.getElementById('relOnOff'+i);
+  const goingOn = btn.classList.contains('off');
+  btn.classList.toggle('on', goingOn);
+  btn.classList.toggle('off', !goingOn);
+  btn.textContent = goingOn ? T('lblOn') : T('lblOff');
+  // GG12: stanje zapisemo TAKOJ v lokalni model (optimisticno) - badge in
+  // graf se odzoveta v istem trenutku, ne sele po dvojnem obhodu prek
+  // brokerja. Ko prispe pravo stanje iz naprave, ga prepise.
+  const s = currentSite();
+  if(s){ const L = ensureLive(s.id); L.rele[i] = goingOn; }
+  sendRelay(i);
+  updateNadzorState();   // GG13: takoj, ne sele ob naslednjem 250ms ciklu
+}
+
+function renderNadzorControls(){
+  const el = document.getElementById('tab-nadzor');
+  const s = currentSite();
+  if(!s){ el.innerHTML = `<div class="empty">${T('emptyNoDevice')}</div>`; return; }
+
+  const uc = ensureUICmd(s.id);
+  relUIMode = {}; srvUIMode = {};
+  for(let i=0;i<4;i++) relUIMode[i] = uc.rele[i].mode;
+  for(let i=0;i<2;i++) srvUIMode[i] = uc.servo[i].mode;
+
+  const L0 = ensureLive(s.id);
+  const binOn = !!L0.binOn;
+  const binPeriod = L0.binPeriod || 1;
+
+  // Ko tece binarno periodicno stetje, so posamezne rele kartice zaklenjene
+  // (krmili jih stevec). Zaklep velja tudi, dokler naprava ni online.
+  let relBody = '';
+  if(binOn) relBody += `<div class="locknote">${T('binLockNote')}</div>`;
+  relBody += `<div class="${binOn?'locked':''}">`;
+  for(let i=0;i<4;i++) relBody += relayCardHtml(i, uc.rele[i]);
+  relBody += `</div>`;
+  relBody += `<div class="unit-card sep">
+    <div class="uc-head"><span class="nm">${T('lblBinCounter')}</span>
+      <span class="tag ${binOn?'on':''}" id="binBadge">${binOn?T('stateActive'):T('stateInactive')}</span></div>
+    <button class="onoff-btn ${binOn?'on':'off'}" id="binOnOff" onclick="toggleBinCounter()">${binOn?T('lblOn'):T('lblOff')}</button>
+    <div class="tblock" style="margin-top:8px"><div class="trow">
+      <label>${T('lblBinPeriod')}</label>
+      <input type="number" inputmode="decimal" id="binPeriod" value="${binPeriod}" min="0.1" max="50" step="0.1" onclick="this.select()" onfocus="this.select()"
+             onchange="syncStepSlider('binPeriod','binPeriodSl'); sendBinary();">
+      <span class="small" id="binValShow">${T('lblBinValue')}: 0</span>
+    </div><input type="range" class="stepslider" id="binPeriodSl" min="0" max="7" value="${nearestStepIdx(binPeriod)}"
+           oninput="stepSliderChange('binPeriod', this.value)" onchange="sendBinary()"></div>
+  </div>`;
+
+  let srvBody = '';
+  for(let i=0;i<2;i++) srvBody += servoCardHtml(i, uc.servo[i]);
+
+  let anBody = '<div class="analog">';
+  for(let i=1;i<=4;i++){
+    anBody += `<div class="a"><b id="anVal${i}">—</b><span>${T('inputN')} ${i} [V]</span></div>`;
+  }
+  anBody += '</div>';
+
+  let h = '';
+  h += cardHtml('releji', T('cardRelays'), 'hRelays', relBody);
+  h += cardHtml('servo', T('cardServo'), 'hServo', srvBody);
+  h += cardHtml('analog', T('cardAnalog'), 'hAnalog', anBody);
+
+  // Dokler naprava ni online, so VSE kontrole onemogocene - stanje se
+  // pridobi iz naprave, ne iz lokalnega predpomnilnika.
+  if(!isDeviceOnline()) h = `<div class="locknote">${T('waitOnline')}</div>` +
+                            `<div class="locked">${h}</div>`;
+
+  el.innerHTML = h;
+
+  updateNadzorState(); // takoj napolni vrednosti z zadnjim znanim stanjem naprave
+}
+
+// Periodicna, NEDESTRUKTIVNA osvezitev.
+// Locene "Trenutno" znacke so odstranjene - gumb ON/OFF in polje Pozicija
+// STA SAMA prikaz resnicnega stanja naprave (sinhronizirata se s tem, kar
+// naprava javi, ne le s tem, kar smo poslali iz tega brskalnika).
+let lastOnlineFlag = null, lastBinOnFlag = null;
+function updateNadzorState(){
+  if(currentTab!=='nadzor') return;
+  const s = currentSite(); if(!s) return;
+  const L = ensureLive(s.id);
+
+  // Sprememba online ali binOn zahteva PONOVEN IZRIS (zaklep/odklep kontrol)
+  const on = isDeviceOnline();
+  if(lastOnlineFlag !== on || lastBinOnFlag !== !!L.binOn){
+    lastOnlineFlag = on; lastBinOnFlag = !!L.binOn;
+    renderNadzorControls();
+    return;
+  }
+
+  // Releji: gumb ON/OFF odraza DEJANSKO stanje naprave
+  for(let i=0;i<4;i++){
+    const btn = document.getElementById('relOnOff'+i);
+    if(!btn) continue;
+    const isOn = !!L.rele[i];
+    if(btn.classList.contains('on') !== isOn){
+      btn.classList.toggle('on', isOn);
+      btn.classList.toggle('off', !isOn);
+      btn.textContent = isOn ? T('lblOn') : T('lblOff');
+    }
+  }
+  const binBadge = document.getElementById('binBadge');
+  if(binBadge){ binBadge.textContent = L.binOn?T('stateActive'):T('stateInactive'); binBadge.classList.toggle('on', !!L.binOn); }
+  const binValShow = document.getElementById('binValShow');
+  if(binValShow) binValShow.textContent = T('lblBinValue')+': '+(L.binarno||0);
+
+  // Servo: gumb ON/OFF odraza, v kateri legi je naprava dejansko
+  // (primerja se z definiranima legama posOff/posOn, s toleranco za rampo)
+  const ucS = ensureUICmd(s.id);
+  for(let i=0;i<2;i++){
+    const btn = document.getElementById('srvOnOff'+i);
+    if(!btn) continue;
+    const cur = L.servo[i]||0;
+    const dOn = Math.abs(cur - (ucS.servo[i].posOn||255));
+    const dOff = Math.abs(cur - (ucS.servo[i].posOff||0));
+    const isOn = dOn < dOff;
+    if(btn.classList.contains('on') !== isOn){
+      btn.classList.toggle('on', isOn); btn.classList.toggle('off', !isOn);
+      btn.textContent = isOn ? T('lblOn') : T('lblOff');
+    }
+  }
+  for(let i=1;i<=4;i++){
+    const v = L.analog['a'+i];
+    const el = document.getElementById('anVal'+i);
+    if(el) el.textContent = v!==undefined ? v.toFixed(1) : '—';
+  }
+}
+
+// Namenski neodvisen cikel (0.25s) - NE čaka na dogodek (MQTT/sim tick),
+// ampak redno prebere trenutno LIVE stanje in ga izriše. Prej se je
+// osvežitev zanašala izključno na dogodke, kar je skupaj z zgornjim
+// bug-om (tiha prekinitev) delovalo šele po dolgi zakasnitvi ali sploh ne.
+setInterval(()=>{ updateNadzorState(); }, 250);
+
+function sendRelay(i){
+  const s = currentSite(); if(!s) return;
+  const uc = ensureUICmd(s.id);
+  const mode = relUIMode[i]||'manual';
+  uc.rele[i].mode = mode;
+  if(mode==='manual'){
+    const isOn = document.getElementById('relOnOff'+i).classList.contains('on');
+    uc.rele[i].on = isOn;
+    sendCommand(s, `rele/${i+1}/set`, { mode:'static', state: isOn });
+  } else {
+    const tonV = parseFloat(document.getElementById('relTon'+i).value);
+    const toffV = parseFloat(document.getElementById('relToff'+i).value);
+    const ton = isNaN(tonV)?1:tonV, toff = isNaN(toffV)?1:toffV;
+    uc.rele[i].ton = ton; uc.rele[i].toff = toff;
+    sendCommand(s, `rele/${i+1}/set`, { mode:'blink', ton, toff });
+  }
+  saveUICmd();
+}
+// Binarno periodicno stetje: {"on":bool,"perioda":sekunde}
+// (staticni binarni nacin z vrednostjo 0-15 je odstranjen - za rocno
+// kombinacijo zadostuje rocni ON/OFF na vsakem releju posebej)
+function sendBinary(){
+  const s = currentSite(); if(!s) return;
+  const L = ensureLive(s.id);
+  const perioda = Math.max(0.1, parseFloat(document.getElementById('binPeriod').value)||1);
+  sendCommand(s, 'binarno/set', { on: !!L.binOn, perioda });
+}
+function toggleBinCounter(){
+  const s = currentSite(); if(!s) return;
+  const L = ensureLive(s.id);
+  const perioda = Math.max(0.1, parseFloat(document.getElementById('binPeriod').value)||1);
+  sendCommand(s, 'binarno/set', { on: !L.binOn, perioda });
+}
+// Rocni servo: vnesene vrednosti se uveljavijo SELE ob kliku na ON/OFF.
+function toggleSrvOnOff(i){
+  const btn = document.getElementById('srvOnOff'+i);
+  const goingOn = btn.classList.contains('off');
+  btn.classList.toggle('on', goingOn);
+  btn.classList.toggle('off', !goingOn);
+  btn.textContent = goingOn ? T('lblOn') : T('lblOff');
+  const s = currentSite(); if(!s) return;
+  const uc = ensureUICmd(s.id);
+  const posOff = parseInt(document.getElementById('srvPosOff'+i).value); 
+  const posOn  = parseInt(document.getElementById('srvPosOn'+i).value);
+  // M2: cas prehoda pod 50ms je pri vzorcenju neviden -> ali 0 (takojsen
+  // skok) ali najmanj 50ms; vmesne vrednosti dvignemo na 50.
+  let rampMs = parseInt(document.getElementById('srvRampM'+i).value)||0;
+  if(rampMs > 0 && rampMs < 50){ rampMs = 50; document.getElementById('srvRampM'+i).value = 50; }
+  uc.servo[i].posOff = isNaN(posOff)?0:posOff;
+  uc.servo[i].posOn  = isNaN(posOn)?255:posOn;
+  uc.servo[i].rampMs = rampMs;
+  uc.servo[i].on = goingOn;
+  uc.servo[i].mode = 'manual';
+  saveUICmd();
+  const targetPos = goingOn ? uc.servo[i].posOn : uc.servo[i].posOff;
+  const L = ensureLive(s.id); L.servo[i] = targetPos;   // GG12: optimisticno
+  sendCommand(s, `servo/${i+1}/set`, {
+    mode:'static', pos: targetPos,
+    posOff: uc.servo[i].posOff, posOn: uc.servo[i].posOn, rampMs });
+  updateNadzorState();   // GG13
+}
+
+function sendServo(i){
+  const s = currentSite(); if(!s) return;
+  const uc = ensureUICmd(s.id);
+  const mode = srvUIMode[i]||'manual';
+  uc.servo[i].mode = mode;
+  if(mode==='manual'){
+    // O1: ob preklopu Perioda->Rocno je treba napravi POVEDATI, da preneha
+    // nihati. Prejsnji `return` je pomenil, da ukaz ni bil poslan in je
+    // servo nihal naprej, dokler uporabnik ni kliknil ON/OFF.
+    const uc2 = uc.servo[i];
+    let rampMs = parseInt(document.getElementById('srvRampM'+i).value)||0;
+    if(rampMs > 0 && rampMs < 50){ rampMs = 50; document.getElementById('srvRampM'+i).value = 50; }
+    const posOff = parseInt(document.getElementById('srvPosOff'+i).value);
+    const posOn  = parseInt(document.getElementById('srvPosOn'+i).value);
+    uc2.posOff = isNaN(posOff)?0:posOff;
+    uc2.posOn  = isNaN(posOn)?255:posOn;
+    uc2.rampMs = rampMs;
+    saveUICmd();
+    sendCommand(s, `servo/${i+1}/set`, {
+      mode:'static', pos: uc2.on ? uc2.posOn : uc2.posOff,
+      posOff: uc2.posOff, posOn: uc2.posOn, rampMs });
+    return;
+  } else {
+    const posA = parseInt(document.getElementById('srvPosA'+i).value)||0;
+    const posB = parseInt(document.getElementById('srvPosB'+i).value)||255;
+    const tonV = parseFloat(document.getElementById('srvTon'+i).value);
+    const toffV = parseFloat(document.getElementById('srvToff'+i).value);
+    const ton = isNaN(tonV)?1:tonV, toff = isNaN(toffV)?1:toffV;
+    let rampMs = parseInt(document.getElementById('srvRampP'+i).value)||0;
+    if(rampMs > 0 && rampMs < 50){ rampMs = 50; document.getElementById('srvRampP'+i).value = 50; }
+    uc.servo[i].posA=posA; uc.servo[i].posB=posB; uc.servo[i].ton=ton; uc.servo[i].toff=toff; uc.servo[i].rampMsP=rampMs;
+    sendCommand(s, `servo/${i+1}/set`, { mode:'oscillate', posA, posB, ton, toff, rampMs });
+  }
+  saveUICmd();
+}
+
+/* ============================================================
+   NASTAVITVE - seznam naprav
+   ============================================================ */
+// A: gumb SHRANI je EDINI nacin shranjevanja. Polja pisejo samo v osnutek
+// (DRAFT); nic se ne shrani lokalno in nic ne poslje napravi do klika Shrani.
+let DRAFT = null;
+function ensureDraft(){
+  if(!DRAFT){
+    DRAFT = { sites: JSON.parse(JSON.stringify(CFG.sites)), cfg:{} };
+    CFG.sites.forEach(s=>{
+      const L = ensureLive(s.id);
+      DRAFT.cfg[s.id] = { offlineGuard:!!L.offlineGuard, bootRestore:!!L.bootRestore,
+                          offlineTimeoutS: L.offlineTimeoutS||60 };
+    });
+  }
+  return DRAFT;
+}
+function draftSet(i, field, val){ ensureDraft().sites[i][field] = val; markDirty(); }
+
+// NN2/NN3/NN4: ob spremembi ID je treba PRESELITI vse, kar je indeksirano
+// po starem ID (DRAFT.cfg, UICMD, LIVE). Prav to je bilo prej razbito in
+// zato je bil ID zaklenjen - zdaj je vzrok odpravljen namesto zaobiden.
+function draftSetId(i, raw){
+  const d = ensureDraft();
+  const oldId = d.sites[i].id;
+  // NN4: normalizacija - velike crke, samo hex, najvec 6 znakov
+  const newId = String(raw||'').toUpperCase().replace(/[^0-9A-F]/g,'').slice(0,6);
+  if(!newId || newId === oldId){ renderSettings(); return; }
+
+  d.sites[i].id = newId;
+  if(d.cfg[oldId]){ d.cfg[newId] = d.cfg[oldId]; delete d.cfg[oldId]; }
+  if(UICMD[oldId]){ UICMD[newId] = UICMD[oldId]; delete UICMD[oldId]; saveUICmd(); }
+  if(LIVE[oldId]){ LIVE[newId] = LIVE[oldId]; delete LIVE[oldId]; }
+  if(SIMS[oldId]){ SIMS[newId] = SIMS[oldId]; delete SIMS[oldId]; saveSims(); }
+  delete LAST_REC_ID[oldId]; delete CLOCK_OFF[oldId];
+  logDebug(`ID naprave spremenjen: ${oldId} -> ${newId} (nastavitve prenesene)`);
+  markDirty(); renderSettings();
+}
+function draftCfg(i, field, val){
+  const d = ensureDraft(); const id = d.sites[i].id;
+  if(!d.cfg[id]) d.cfg[id] = {offlineGuard:false, bootRestore:false, offlineTimeoutS:60};
+  d.cfg[id][field] = val; markDirty();
+}
+function markDirty(){
+  const b = document.getElementById('saveBtn');
+  if(b) b.classList.add('primary');
+}
+
+function renderSettings(){
+  const d = ensureDraft();
+  const list = document.getElementById('siteList');
+  list.innerHTML = '';
+  d.sites.forEach((s,i)=>{
+    const c = d.cfg[s.id] || {offlineGuard:false, bootRestore:false, offlineTimeoutS:60};
+    const r = document.createElement('div');
+    r.className='r';
+    r.innerHTML = `
+      <div class="r1">
+        <input value="${s.name}" onchange="draftSet(${i},'name',this.value)" placeholder="${T('phName')}">
+        <input value="${s.id}" onchange="draftSetId(${i}, this.value)" title="${T('idHint')}"
+               placeholder="${T('phId')}" maxlength="6" style="width:84px" inputmode="text">
+        <button class="btn ghost" onclick="deleteSite(${i})">✕</button>
+      </div>
+      <input value="${s.mqtt}" onchange="draftSet(${i},'mqtt',this.value)" placeholder="${T('phMqtt')}">
+      <select onchange="draftSet(${i},'opMode',this.value)">
+        <option value="sim_local" ${s.opMode==='sim_local'?'selected':''}>${T('opSimLocal')}</option>
+        <option value="sim_broker" ${s.opMode==='sim_broker'?'selected':''}>${T('opSimBroker')}</option>
+        <option value="real" ${s.opMode==='real'?'selected':''}>${T('opReal')}</option>
+      </select>
+      <label class="lbl" style="min-width:0;display:flex;gap:7px;align-items:center;margin-top:4px">
+        <input type="checkbox" ${c.offlineGuard?'checked':''} onchange="draftCfg(${i},'offlineGuard',this.checked)">
+        ${T('cfgOfflineGuard')}
+      </label>
+      <p class="small">${T('cfgOfflineGuardHint')}</p>
+      <div class="pos-row"><label>${T('cfgTimeout')}</label>
+        <input type="number" inputmode="decimal" min="5" max="3600" step="5" value="${c.offlineTimeoutS}" onclick="this.select()"
+               onchange="draftCfg(${i},'offlineTimeoutS', Math.max(5, parseInt(this.value)||60))"></div>
+      <label class="lbl" style="min-width:0">${T('cfgBootMode')}</label>
+      <select onchange="draftCfg(${i},'bootRestore', this.value==='1')">
+        <option value="0" ${!c.bootRestore?'selected':''}>${T('cfgBoot0')}</option>
+        <option value="1" ${c.bootRestore?'selected':''}>${T('cfgBootRestore')}</option>
+      </select>`;
+    list.appendChild(r);
+  });
+}
+
+// Shrani osnutek: lokalno + prenesi nastavitve nacinov na naprave.
+function saveSettings(){
+  const d = ensureDraft();
+  CFG.sites = JSON.parse(JSON.stringify(d.sites));
+  fixSiteIdx();   // OO2
+  saveCfg();
+  CFG.sites.forEach(s=>{
+    const c = d.cfg[s.id]; if(!c) return;
+    const L = ensureLive(s.id);
+    L.offlineGuard = c.offlineGuard; L.bootRestore = c.bootRestore; L.offlineTimeoutS = c.offlineTimeoutS;
+    sendCommand(s, 'config/set', { offlineGuard:c.offlineGuard, bootRestore:c.bootRestore,
+                                    offlineTimeoutS:c.offlineTimeoutS });
+  });
+  DRAFT = null;
+  const b = document.getElementById('saveBtn'); if(b) b.classList.remove('primary');
+  connectAll(); renderTabs(); renderAll(); renderSettings();
+  showToast(T('savedOk'));
+}
+
+// C: UPORABI - shrani in ponovno zazene cel sistem s trenutnimi podatki:
+// zapre vse MQTT povezave, jih znova vzpostavi, znova naroci teme,
+// ponovno poslje konfiguracijo in osvezi vse zavihke.
+function applySettings(){
+  saveSettings();
+  Object.keys(mqttClients).forEach(b=>{
+    try{ mqttClients[b].end(true); }catch(e){}
+    logDebug(`UPORABI: zapiram MQTT povezavo (${b})`);
+  });
+  mqttClients = {};
+  simBrokerListening = new Set();
+  LIVE = {}; OSCBUF = {}; CLOCK_OFF = {}; CLOCK_MIN = {}; CLOCK_N = {}; CLOCK_LAST = {}; LAST_REC_ID = {}; TB_MISMATCH = {};
+  lastOnlineFlag = null; lastBinOnFlag = null;
+  connectAll();
+  _syncedSites = new Set();
+  setTimeout(()=>{ CFG.sites.forEach(site=>syncDeviceToUI(site, true)); }, 1200);
+  renderTabs(); renderAll(); renderSettings();
+  closeDrawer();   // K3: gumb Uporabi zapre panel Nastavitve
+  showToast(T('appliedOk'));
+  logDebug('UPORABI: sistem ponovno zagnan s trenutnimi nastavitvami');
+}
+// Dodajanje/brisanje deluje na OSNUTKU - uveljavi se sele ob kliku Shrani.
+function addSite(){
+  const d = ensureDraft();
+  d.sites.push({ name:T('newDeviceName'), id:'000000', mqtt:'broker.emqx.io', opMode:'sim_local' });
+  d.cfg['000000'] = { offlineGuard:false, bootRestore:false, offlineTimeoutS:60 };
+  markDirty(); renderSettings();
+}
+function deleteSite(i){
+  const d = ensureDraft();
+  d.sites.splice(i,1);
+  markDirty(); renderSettings();
+}
+
+/* ============================================================
+   SIMULATOR (per naprava, glede na opMode)
+   ============================================================ */
+function tickRelaySim(r, now){
+  if(r.mode!=='blink') return;
+  const durMs = (r.phaseOn ? r.ton : r.toff) * 1000;
+  if(now - r.last >= durMs){ r.phaseOn = !r.phaseOn; r.state = r.phaseOn; r.last = now; }
+}
+// Vrne true, ko je rampa dokoncana. Identicno firmware advanceRamp():
+// cas prehoda je HITROST premika, pozicija se interpolira med legama.
+// Virtualna naprava (sim_broker) objavi zacetek rampe kot dogodek -
+// enak protokol kot firmware startServoRamp().
+// GG8: simPublishRamp odstranjen - rampa je vidna skozi zaporedne zapise
+
+function advanceRampSim(sv, now){
+  if(sv.pos === sv.target) return true;
+  if(!sv.rampMs){ sv.pos = sv.target; return true; }
+  const frac = (now - (sv.rampStart||0)) / sv.rampMs;
+  if(frac >= 1) sv.pos = sv.target;
+  else sv.pos = Math.max(0, Math.min(255, Math.round(sv.rampFrom + (sv.target - sv.rampFrom) * frac)));
+  return sv.pos === sv.target;
+}
+
+// 4-FAZNI CIKEL (identicno firmware tickServos):
+//   RAMP_A (rampMs) -> HOLD_A (ton) -> RAMP_B (rampMs) -> HOLD_B (toff) -> ...
+// Cas prehoda se PRISTEVA zadrzevalnemu casu, ne tece vzporedno z njim.
+function tickServoSim(sv, now, site, idx){
+  if(sv.mode!=='oscillate'){
+    advanceRampSim(sv, now); // rocni nacin: samo dokoncaj morebitno rampo
+    return;
+  }
+  switch(sv.phase){
+    case 'RAMP_A':
+      if(advanceRampSim(sv, now)){ sv.phase='HOLD_A'; sv.phaseStart=now; }
+      break;
+    case 'HOLD_A':
+      if(now - sv.phaseStart >= sv.ton*1000){
+        sv.rampFrom = sv.pos; sv.target = sv.posB;
+        sv.rampStart = now; sv.phase='RAMP_B'; sv.phaseStart = now;
+      }
+      break;
+    case 'RAMP_B':
+      if(advanceRampSim(sv, now)){ sv.phase='HOLD_B'; sv.phaseStart=now; }
+      break;
+    case 'HOLD_B':
+      if(now - sv.phaseStart >= sv.toff*1000){
+        sv.rampFrom = sv.pos; sv.target = sv.posA;
+        sv.rampStart = now; sv.phase='RAMP_A'; sv.phaseStart = now;
+      }
+      break;
+    default: sv.phase='RAMP_A'; sv.phaseStart=now;
+  }
+}
+
+// POPOLNOMA POENOSTAVLJENA LOGIKA (popravek): prej je applySimCommand()
+// posodobil SAMO interni `sim` objekt - povezava do LIVE (od koder se
+// bere prikaz) je tekla IZKLJUCNO skozi periodicni tick, ta pa je bil
+// pogojen z "sim.running" (Start). Ce simulator ni bil zagnan, se ukaz
+// ni nikoli prikazal - "vklop/izklop se ni prenesel".
+// Zdaj: vsak ukaz TAKOJ izracuna in zapise trenutno stanje (klic spodaj),
+// "running" pa vpliva SAMO na to, ali Ton/Toff/nihanje casovniki tecejo
+// naprej (blinka/niha) - ne vec na to, ali se stanje sploh prikaze.
+// GG8/GG9: virtualna naprava oddaja ENAK enoten 19B zapis kot firmware -
+// ena sama pot, brez dogodkov. sim_local zapise naravnost v buffer,
+// sim_broker pa objavi prek MQTT in prejme nazaj (test prave poti).
+let SIM_REC_ID = {};
+function simEncodeRecord(sim, releState, servoState, now){
+  const buf = new ArrayBuffer(8 + 19);
+  const dv = new DataView(buf);
+  dv.setUint32(0, 100, true);      // timebase (informativno)
+  dv.setUint16(4, 1, true);        // n = 1 zapis
+  dv.setUint16(6, 0, true);
+  const relBits = releState.reduce((a,b,i)=>a|(b?(1<<i):0), 0);
+  dv.setUint32(8, ++sim._recId, true);
+  // MM2: cas od ZAGONA STRANI (kot millis() na ESP32), ne odrezan Unix cas.
+  // Prej je bil zapisan `Date.now() >>> 0`, zato je bil izracunani odmik ure
+  // ~1.79e12 ms (56 let) in vsi vzorci so pristali na napacnem casu.
+  dv.setUint32(12, Math.round(performance.now()) >>> 0, true);
+  dv.setUint8(16, relBits);
+  dv.setUint8(17, servoState[0]); dv.setUint8(18, servoState[1]);
+  dv.setUint16(19, Math.round((sim.analog.a1||0)*10), true);
+  dv.setUint16(21, Math.round((sim.analog.a2||0)*10), true);
+  dv.setUint16(23, Math.round((sim.analog.a3||0)*10), true);
+  dv.setUint16(25, Math.round((sim.analog.a4||0)*10), true);
+  return new Uint8Array(buf);
+}
+
+// JJ7: virtualna naprava simulira CELOTEN Offline Guard mehanizem -
+// izguba klienta -> cakanje timeouta -> prisilni OFF -> ponovna prijava.
+// Prej je simulator config/set le shranil, delovanja pa ni posnemal, zato
+// tega dela protokola ni bilo mogoce preizkusiti brez prave naprave.
+function simOfflineGuardTick(site, sim, now){
+  const L = ensureLive(site.id);
+  if(!L.offlineGuard){ sim._forcedOff = false; sim._clientGoneAt = 0; return false; }
+  // klient je "prisoten", dokler tece heartbeat (v simulaciji: stran je odprta)
+  const clientOnline = !document.hidden;
+  if(clientOnline){
+    if(sim._forcedOff) logDebug(`SIM ${site.id}: klient spet prisoten - guard sproscen`);
+    sim._forcedOff = false; sim._clientGoneAt = 0;
+    return false;
+  }
+  if(!sim._clientGoneAt) sim._clientGoneAt = now;
+  const timeoutMs = Math.max(5, L.offlineTimeoutS||60) * 1000;
+  if(!sim._forcedOff && now - sim._clientGoneAt >= timeoutMs){
+    sim._forcedOff = true;
+    sim.rele.forEach(r=>{ r.state = false; r.mode = 'static'; });
+    sim.servo.forEach(sv=>{ sv.pos = 0; sv.target = 0; sv.mode = 'static'; });
+    sim.binMode = false;
+    logDebug(`SIM ${site.id}: OFFLINE GUARD - izhodi na 0 po ${timeoutMs/1000}s`, true);
+  }
+  return sim._forcedOff;
+}
+
+function pushSimStateNow(site, sim){
+  const now = Date.now();
+  simOfflineGuardTick(site, sim, now);   // JJ7
+  if(sim._recId === undefined) sim._recId = 0;
+  const releState = sim.binMode ? [0,1,2,3].map(i=>!!((sim.binVal>>i)&1)) : sim.rele.map(r=>r.state);
+  const servoState = sim.servo.map(x=>x.pos);
+  const L = ensureLive(site.id);
+
+  if(site.opMode==='sim_local'){
+    // GG9: enak zapis kot pri pravi napravi, le brez MQTT poti
+    pushOscSample(site.id, { t: now, rele: releState.slice(), servo: servoState.slice(),
+                             analog: Object.assign({}, sim.analog) });
+    L.online = true; L.stale = false; L.lastSeen = now;
+    L.rele = releState; L.binarno = sim.binVal; L.binMode = sim.binMode;
+    L.binOn = !!sim.binMode; L.binPeriod = sim.binPeriod||1;
+    L.servo = servoState; L.analog = sim.analog;
+  } else if(site.opMode==='sim_broker'){
+    const c = getClient(site.mqtt);
+    if(c && c.connected){
+      if(!sim._lastPub) sim._lastPub = { adc:0, status:0 };
+      const lp = sim._lastPub;
+      // GG8: en zapis na ~200ms (kot firmware), plus takoj ob spremembi
+      const relKey = releState.map(b=>b?1:0).join('') + '|' + servoState.join(',');
+      const changed = (lp.key !== relKey);
+      if(changed || now - lp.adc >= 200){
+        lp.adc = now; lp.key = relKey;
+        c.publish(`naprava/${site.id}/scope/data`, simEncodeRecord(sim, releState, servoState, now));
+      }
+      if(now - lp.status >= 5000){
+        lp.status = now;
+        c.publish(`naprava/${site.id}/status`, 'online', {retain:true});
+        c.publish(`naprava/${site.id}/config/stanje`, JSON.stringify({
+          offlineGuard: !!L.offlineGuard, bootRestore: !!L.bootRestore,
+          binOn: !!sim.binMode, binPeriod: sim.binPeriod||1 }), {retain:true});
+      }
+    } else {
+      logDebug(`pushSimStateNow ${site.id}: MQTT ni povezan`, true);
+    }
+  }
+  if(currentSite() && currentSite().id===site.id){
+    renderSiteMenu();
+    if(currentTab==='nadzor') updateNadzorState();
+  }
+}
+
+// Izvrsi ukaz (isti kot bi ga ESP32 firmware) na virtualni napravi.
+// Uporabljeno tako za sim_local (direktni klic iz sendCommand) kot za
+// sim_broker (prejeto preko MQTT .../set - glej ensureSimBrokerListening).
+function applySimCommand(site, subtopic, d){
+  logDebug(`applySimCommand ${site.id} ${subtopic} <- ${JSON.stringify(d)}`);
+  const sim = ensureSim(site.id);
+  const relM = subtopic.match(/^rele\/(\d)\/set$/);
+  const srvM = subtopic.match(/^servo\/(\d)\/set$/);
+  if(relM){
+    const i = parseInt(relM[1])-1;
+    if(sim.binMode) return; // med binarnim stetjem so posamezni releji zaklenjeni
+    const mode = d.mode||'static';
+    sim.rele[i].mode = mode;
+    if(mode==='static'){
+      // S3: zakljucek cikla -> rele v mirovanje (0), razen ce je ukazan ON
+      sim.rele[i].state = !!d.state;
+    } else {
+      // S2: ciklicno delovanje se VEDNO zacne od zacetka (faza ON)
+      sim.rele[i].ton = d.ton ?? 1; sim.rele[i].toff = d.toff ?? 1;
+      sim.rele[i].phaseOn = true; sim.rele[i].state = true; sim.rele[i].last = Date.now();
+    }
+  } else if(srvM){
+    const i = parseInt(srvM[1])-1;
+    const mode = d.mode||'static';
+    const sv = sim.servo[i];
+    sv.mode = mode;
+    if(d.rampMs!==undefined) sv.rampMs = d.rampMs|0;   // cas prehoda (0 = takojsen skok)
+    const now = Date.now();
+    // M1: `||` pozre veljavno vrednost 0 (npr. Pozicija OFF = 0) - povsod ??
+    if(d.posOff!==undefined) sv.posOff = d.posOff;
+    if(d.posOn!==undefined)  sv.posOn  = d.posOn;
+    if(mode==='static'){
+      // O3/S3: zakljucek cikla - pocisti fazo, servo gre na ROCNO lego
+      // (posOff/posOn iz ukaza), ne na 0
+      sv.phase = 'RAMP_A'; sv.phaseStart = now;
+      // rocni gumb ON/OFF: premik na ciljno lego z rampo (ne skok)
+      sv.rampFrom = sv.pos; sv.target = d.pos ?? 0; sv.rampStart = now;
+      if(!sv.rampMs) sv.pos = sv.target;
+    } else {
+      sv.posA = d.posA ?? 0; sv.posB = d.posB ?? 255;
+      sv.ton = d.ton ?? 1; sv.toff = d.toff ?? 1;
+      // S2: cikel se VEDNO zacne od zacetka - iz trenutne lege na PozA
+      sv.rampFrom = sv.pos; sv.target = sv.posA; sv.rampStart = now;
+      sv.phase = 'RAMP_A'; sv.phaseStart = now;   // cikel se zacne s PREHODOM
+      if(!sv.rampMs) sv.pos = sv.target;
+    }
+  } else if(subtopic==='binarno/set'){
+    // binarno PERIODICNO stetje (staticni nacin je odstranjen)
+    const wasOn = sim.binMode;
+    if(d.on!==undefined) sim.binMode = !!d.on;
+    if(d.perioda!==undefined) sim.binPeriod = Math.max(0.1, d.perioda);
+    // S2: ob vklopu se stetje VEDNO zacne od 0
+    if(sim.binMode && !wasOn){ sim.binVal = 0; sim.binLast = Date.now(); }
+    // S3: ob izklopu binarnega stetja gredo releji v mirovanje (0)
+    if(!sim.binMode && wasOn){
+      sim.rele.forEach(r=>{ if(r.mode!=='blink'){ r.state = false; } });
+    }
+    const Lb = ensureLive(site.id);
+    Lb.binOn = sim.binMode; Lb.binPeriod = sim.binPeriod||1;
+  } else if(subtopic==='config/set'){
+    const Lc = ensureLive(site.id);
+    if(d.offlineGuard!==undefined) Lc.offlineGuard = !!d.offlineGuard;
+    if(d.bootRestore!==undefined)  Lc.bootRestore  = !!d.bootRestore;
+    logDebug(`SIM config ${site.id}: offlineGuard=${Lc.offlineGuard} bootRestore=${Lc.bootRestore}`);
+  } else {
+    logDebug(`applySimCommand ${site.id}: neprepoznan subtopic "${subtopic}"`, true);
+  }
+  saveSims();
+  pushSimStateNow(site, sim); // takoj odrazi spremembo - ne caka na tick/running
+}
+
+// Virtualna naprava "tece" ~10x/s (0.1s) - realtime obcutek za utripanje/nihanje.
+// POPRAVEK: prejsnja verzija je imela `if(!sim.running) return;` PRED
+// klicem pushSimStateNow(), kar je prekinilo cel cikel za to napravo -
+// stanje se torej NI objavljalo/osvezevalo, ce Simulator ni bil zagnan,
+// ne glede na to, da je applySimCommand() ze klical pushSimStateNow()
+// enkrat ob ukazu (ena sama objava je lahko izgubljena/zakasnjena na
+// javnem MQTT brokerju, brez ponovitve). Zdaj: pushSimStateNow() tece
+// VEDNO na vsakih 100ms za VSAKO sim napravo (ne glede na running) -
+// "running" vpliva SAMO se na to, ali Ton/Toff/nihanje casovniki
+// napredujejo (ali rele/servo dejansko preklaplja fazo).
+setInterval(()=>{
+  const now = Date.now();
+  CFG.sites.forEach(site=>{
+    if(site.opMode==='real') return;
+    const sim = ensureSim(site.id);
+    // L1: virtualna naprava dela VEDNO - enako kot pravi firmware, ki nima
+    // nobenega "Start" gumba. Kar uporabnik vklopi v Nadzoru (binarno stetje,
+    // utripanje, nihanje), se izvaja takoj. Prejsnji pogoj sim.running je
+    // povzrocil, da se stevec ni premikal, ceprav je pisalo AKTIVNO.
+    if(sim._forcedOff) return;   // JJ7: guard je izklopil izhode - vse ustavljeno
+    if(sim.binMode){
+      const stepMs = Math.max(100, (sim.binPeriod||1)*1000);
+      if(now - (sim.binLast||0) >= stepMs){
+        sim.binLast = now;
+        sim.binVal = ((sim.binVal||0) + 1) & 0x0F;
+      }
+    } else {
+      sim.rele.forEach(r=>tickRelaySim(r, now));
+    }
+    sim.servo.forEach((sv,idx)=>tickServoSim(sv, now, site, idx));
+    pushSimStateNow(site, sim); // vedno - zagotavlja neprekinjeno samodejno osvezitev/popravek stanja
+  });
+}, 100);
+
+// sim_broker: virtualna naprava se narocni na iste .../set teme kot pravi
+// firmware in izvede applySimCommand() - enak potek kot Nadzor->ESP32.
+// POPRAVEK: prej se je to zgodilo SAMO ob kliku "Zaženi" v Simulator
+// zavihku - ce uporabnik ni pritisnil Start, ukazi iz Nadzora niso sli
+// nikamor (nihce ni poslusal teme). Zdaj se poklice takoj ob dodajanju/
+// povezavi naprave (glej connectAll/resubscribeAll), Start/Stop pa
+// vpliva samo se na to, ali Ton/Toff/nihanje casovniki napredujejo.
+// idempotentno - varuje pred podvojenimi 'message' listenerji.
+let simBrokerListening = new Set();
+function ensureSimBrokerListening(site){
+  if(site.opMode!=='sim_broker') return;
+  if(simBrokerListening.has(site.id)){ logDebug(`ensureSimBrokerListening ${site.id}: ze narocen (preskok)`); return; }
+  const c = getClient(site.mqtt);
+  if(!c){ logDebug(`ensureSimBrokerListening ${site.id}: NI MQTT klienta za ${site.mqtt}`, true); return; }
+  c.subscribe(`naprava/${site.id}/rele/+/set`);
+  c.subscribe(`naprava/${site.id}/servo/+/set`);
+  c.subscribe(`naprava/${site.id}/binarno/set`);
+  c.subscribe(`naprava/${site.id}/config/set`);
+  logDebug(`ensureSimBrokerListening ${site.id}: SUB rele/+/set, servo/+/set, binarno/set, config/set`);
+  c.on('message', (topic, payload)=>{
+    if(!topic.startsWith(`naprava/${site.id}/`) || !topic.endsWith('/set')) return;
+    logDebug(`SIM <- ukaz ${topic} (${payload.length}B)`);
+    try{
+      const d = JSON.parse(payload.toString());
+      const subtopic = topic.slice((`naprava/${site.id}/`).length);
+      applySimCommand(site, subtopic, d);
+    }catch(e){ logDebug(`SIM ukaz ${topic}: napaka parsanja JSON: ${e.message}`, true); }
+  });
+  simBrokerListening.add(site.id);
+}
+
+// Simulator = samo-berljiv prikaz stanja virtualne naprave (v realnem casu).
+// Krmiljenje relejev/servo poteka IZKLJUCNO iz Nadzora (enako kot pri pravi
+// napravi) - tu ni vec urejevalnih polj zanje. Edino urejevalno polje so
+// simulirani analogni vhodi (simulacija senzorja, ki ga od drugod ni mogoce ukazati).
+// Enak popravek kot pri Nadzoru: STRUKTURA (Start/Stop, analogni drsniki)
+// se izriše samo ob menjavi zavihka/naprave; STANJE (badge-i za releje/servo)
+// se osvezuje periodicno preko direktnega DOM zapisa - drsniki se med tem
+// nikoli ne prerisejo, zato vlecenje prsta ni prekinjeno.
+function renderSimulatorControls(){
+  const el = document.getElementById('tab-simulator');
+  const s = currentSite();
+  if(!s){ el.innerHTML = `<div class="empty">${T('emptyNoDevice')}</div>`; return; }
+  if(s.opMode==='real'){ el.innerHTML = `<div class="empty">${T('opReal')}</div>`; return; }
+  const sim = ensureSim(s.id);
+
+  let h = `<div class="card"><div class="chead"><h3>${T('cardSim')}</h3><button class="hb" onclick="openHelp('hSim')"></button></div>
+  <div class="cbody" style="max-height:none">
+  <p class="small">${T('simHint')}</p>
+  </div></div>`;
+
+  let stB = '<div class="row2" id="simRelBadges">';
+  for(let i=0;i<4;i++) stB += `<span class="tag" id="simRelTag${i}" style="min-width:64px;text-align:center">${T('relayN')} ${i+1}: —</span>`;
+  stB += '</div>';
+  stB += `<p class="small" id="simBinInfo" style="display:none"></p>`;
+  stB += '<div class="row2 sep" id="simSrvBadges">';
+  for(let i=0;i<2;i++) stB += `<span class="tag on" id="simSrvTag${i}" style="min-width:80px;text-align:center">${T('servoN')} ${i+1}: —</span>`;
+  stB += '</div>';
+  h += cardHtml('simstate', T('cardRelays')+' / '+T('cardServo'), 'hSim', stB);
+
+  let anB = '';
+  for(let i=1;i<=4;i++){
+    anB += `<div class="row2"><label class="lbl">${T('inputN')} ${i}</label>
+      <input type="range" min="0" max="40" step="0.1" value="${sim.analog['a'+i]||0}" style="flex:1"
+        oninput="ensureSim('${s.id}').analog.a${i}=parseFloat(this.value); this.nextElementSibling.textContent=this.value+'V'; saveSims();">
+      <span style="min-width:45px">${(sim.analog['a'+i]||0)}V</span>
+    </div>`;
+  }
+  h += cardHtml('simanalog', T('cardSimAnalog'), 'hSim', anB);
+
+  // LL1: Debug kartica je PRESELJENA v zavihek Osciloskop - pri realnem
+  // nacinu zavihek Simulator izgine, s tem pa bi izgubili dostop do dnevnika
+  // ravno takrat, ko je najbolj potreben.
+
+  el.innerHTML = h;
+  updateSimulatorState();
+}
+
+function updateSimulatorState(){
+  if(currentTab!=='simulator') return;
+  const s = currentSite(); if(!s || s.opMode==='real') return;
+  const sim = ensureSim(s.id);
+  const releState = sim.binMode ? [0,1,2,3].map(i=>!!((sim.binVal>>i)&1)) : sim.rele.map(r=>r.state);
+
+  for(let i=0;i<4;i++){
+    const t = document.getElementById('simRelTag'+i);
+    if(!t) continue; // ta badge se ni izrisan - NE prekini cele funkcije (prej: return)
+    t.textContent = `${T('relayN')} ${i+1}: ${releState[i]?T('lblOn'):T('lblOff')}`;
+    t.classList.toggle('on', releState[i]);
+    t.classList.toggle('off', !releState[i]);
+  }
+  const binInfo = document.getElementById('simBinInfo');
+  if(binInfo){
+    binInfo.style.display = sim.binMode ? 'block':'none';
+    binInfo.textContent = `${T('lblBinary')}: ${sim.binVal} (0-15)`;
+  }
+  for(let i=0;i<2;i++){
+    const t = document.getElementById('simSrvTag'+i);
+    if(t) t.textContent = `${T('servoN')} ${i+1}: ${sim.servo[i].pos}`;
+  }
+}
+
+// realtime osvezitev BADGE-ov (ne drsnikov!) v Simulator zavihku - 0.25s, enotno z Nadzorom
+setInterval(()=>{ updateSimulatorState(); }, 250);
+
+/* ============================================================
+   OSCILOSKOP
+   ============================================================ */
+let OSC_TIMEBASE = 1000; // SS4: privzeto 1s
+const OSC_TIMEBASES = [1,10,100,1000,2000,5000,10000,20000];
+// HH2: zoom = KOLIKO ZADNJIH VZORCEV iz bufferja se prikaze v oknu.
+// Sirina okna v casu = stevilo vzorcev x casovna baza.
+// Pri ~900px zaslona je 900 vzorcev "en vzorec na piksel" (optimalno);
+// vec kot to se zlije, manj pa razpotegne.
+// RR1: dodane fine stopnje (250/100/50) za podroben pregled posameznih
+// preklopov. Pri 900 vzorcih je ~1 vzorec na piksel, nizje pa razpotegnjeno.
+const OSC_ZOOMS = [30000, 15000, 7000, 3500, 1750, 900, 500, 250, 100, 50];
+let OSC_SAMPLES = 50;   // SS4: privzeto 50 zapisov
+let OSC_ZOOM = 1; // 1 = privzeta sirina okna (ohranjeno za scipanje)
+// EE3: zamrznjen prikaz - zbiranje podatkov tece naprej, le izris stoji.
+// OSC_FROZEN_AT je "zdaj" v trenutku ustavitve, OSC_PAN pa odmik pri
+// drsenju nazaj po zgodovini (v ms; pozitivno = nazaj v preteklost).
+let OSC_RUNNING = true;
+let OSC_FROZEN_AT = 0;
+let OSC_PAN = 0;
+
+// Desni rob okna: pri zivem prikazu "zdaj", pri zamrznjenem trenutek
+// ustavitve, zamaknjen za drsenje.
+function oscNowRef(){
+  return (OSC_RUNNING ? Date.now() : OSC_FROZEN_AT) - OSC_PAN;
+}
+
+// HH4: oznaka, kje v bufferju smo (koliko nazaj od najnovejsega podatka)
+function updateOscPosInfo(){
+  const el = document.getElementById('oscPosInfo');
+  if(!el) return;
+  if(OSC_RUNNING && OSC_PAN === 0){
+    el.textContent = `${T('oscWinInfo')}: ${OSC_SAMPLES} × ${OSC_TIMEBASE<1000?OSC_TIMEBASE+'ms':(OSC_TIMEBASE/1000)+'s'} = ${fmtDur(oscWindowMs(), oscWindowMs())}`;
+  } else {
+    const backSamples = Math.round(OSC_PAN / Math.max(1, OSC_TIMEBASE));
+    el.textContent = `${T('oscPos')}: −${fmtDur(OSC_PAN, OSC_PAN)} (≈ ${backSamples} ${T('oscSamples')})`;
+  }
+}
+
+function toggleOscRun(){
+  OSC_RUNNING = !OSC_RUNNING;
+  logDebug(`OSC: prikaz ${OSC_RUNNING?'V ZIVO':'USTAVLJEN'}`);
+  if(OSC_RUNNING){ OSC_PAN = 0; }          // nazaj na zivi prikaz
+  else { OSC_FROZEN_AT = Date.now(); }     // zamrzni na tem trenutku
+  renderOscFull();
+}
+
+// U1: izbrana casovna baza je SIRINA OKNA (gumb "2s" = 2s prikaza), razen
+// pri zelo hitrih bazah, kjer okno ostane 2s (1ms okno bi bilo neuporabno).
+// Prej je bil skok z 1s (okno 2s) na 2s (okno 20s) - nelogicno in nezvezno.
+// HH1/HH2: casovna baza je FREKVENCA vzorcenja, zoom pa doloca, koliko
+// zadnjih vzorcev je v oknu. Sirina okna = vzorci x baza.
+function oscWindowMs(){
+  return Math.max(200, (OSC_SAMPLES * OSC_TIMEBASE) / OSC_ZOOM);
+}
+
+// Osciloskop je samo se v svojem zavihku (mini prikaz v Nadzoru odstranjen).
+function oscChannelHtml(mode, siteId){
+  let h = `<div class="row2" style="margin-bottom:8px">
+      <button class="btn ${OSC_RUNNING?'':'primary'}" onclick="toggleOscRun()">
+        ${OSC_RUNNING ? T('oscStop') : T('oscStart')}</button>
+      <span class="tag ${OSC_RUNNING?'on':''}">${OSC_RUNNING ? T('oscLive') : T('oscFrozen')}</span>
+      ${OSC_RUNNING ? '' : `<span class="small">${T('oscPanHint')}</span>`}
+    </div>
+    <div class="osc-tb" id="oscTbBar"></div>
+    <div class="osc-tb" id="oscZoomBar" style="margin-top:-4px"></div>
+    <div class="small" id="oscPosInfo" style="margin-bottom:6px"></div>`;
+  ['rele','servo','analog'].forEach(grp=>{
+    const title = grp==='rele'?T('grpRelays'):(grp==='servo'?T('grpServo'):T('grpAnalog'));
+    const legendItems = grp==='rele' ? ['R1','R2','R3','R4'] : (grp==='servo' ? ['S1','S2'] : ['A1','A2','A3','A4']);
+    const legend = legendItems.map((nm,i)=>`<span><i style="background:${OSC_COLORS[i]}"></i>${nm}</span>`).join('');
+    h += `<div class="osc-grp">
+      <div class="lbl2"><span>${title}</span></div>
+      <div class="osc-canvas-wrap" id="oscCanvasWrap_full_${grp}">
+        <canvas id="oscCanvas_full_${grp}"></canvas>
+        <div class="osc-tip" id="oscTip_full_${grp}"></div>
+      </div>
+      <div class="osc-legend">${legend}</div>
+    </div>`;
+  });
+  h += `<p class="small">${T('oscTapHint')}</p>`;
+  // LL1: diagnosticni dnevnik na dnu zavihka Osciloskop
+  h += `<div class="sep" style="margin-top:12px">
+    <div class="chead" style="padding:0 0 8px"><h3>${T('cardDebug')}</h3></div>
+    <div class="row2">
+      <button class="btn primary" onclick="showDebugLog()">${T('btnShowLog')}</button>
+      <button class="btn" onclick="copyDebugLog()">${T('btnCopy')}</button>
+      <button class="btn" onclick="clearDebugLog()">${T('btnClear')}</button>
+      <span class="small" id="debugInfo"></span>
+    </div>
+    <pre id="debugLogBox" class="debug-box"></pre>
+  </div>`;
+  return h;
+}
+
+// L3: enoto doloci CELOTNO okno, ne vsaka oznaka posebej - sicer je na isti
+// osi mesanica (-1.8s ... -921ms). windowMs je referenca za vse oznake.
+function fmtDur(ms, windowMs){
+  const ref = (windowMs===undefined) ? ms : windowMs;
+  if(ref < 1000) return Math.round(ms)+'ms';
+  return (ms/1000).toFixed(ref<10000?1:0)+'s';
+}
+
+// LL3: povzetek okolja - zapise se ob prvem odprtju osciloskopa, da je v
+// dnevniku vedno kontekst (katera naprava, kateri broker, kateri nacin).
+let _diagSummaryDone = false;
+function logDiagSummary(){
+  if(_diagSummaryDone) return;
+  _diagSummaryDone = true;
+  const s = currentSite();
+  logDebug(`--- DIAGNOSTIKA ---`);
+  logDebug(`app=${APP_VERSION}  naprave=${CFG.sites.length}  jezik=${LANG}`);
+  if(s) logDebug(`aktivna: '${s.name}' id=${s.id} broker=${s.mqtt} nacin=${s.opMode}`);
+  logDebug(`osc: baza=${OSC_TIMEBASE}ms vzorcev=${OSC_SAMPLES} buffer=${OSC_MAX_SAMPLES} dnevnik=${DEBUG_CAP}`);
+  logDebug(`brskalnik: ${navigator.userAgent.substring(0,80)}`);
+  logDebug(`-------------------`);
+}
+
+function renderOscFull(){
+  logDiagSummary();
+  const el = document.getElementById('tab-osciloskop');
+  const s = currentSite();
+  if(!s){ el.innerHTML = `<div class="empty">${T('emptyNoDevice')}</div>`; return; }
+  el.innerHTML = `<div class="card"><div class="cbody" style="max-height:none;padding-top:14px">${oscChannelHtml('full', s.id)}</div></div>`;
+
+  const bar = document.getElementById('oscTbBar');
+  OSC_TIMEBASES.forEach(tb=>{
+    const b = document.createElement('button');
+    b.textContent = tb<1000 ? tb+'ms' : (tb/1000)+'s';   // 1ms..20s
+    b.setAttribute('aria-pressed', tb===OSC_TIMEBASE ? 'true':'false');
+    b.onclick = ()=>{
+      OSC_TIMEBASE=tb; OSC_ZOOM=1;
+      logDebug(`OSC: casovna baza=${tb<1000?tb+'ms':(tb/1000)+'s'}, okno=${fmtDur(oscWindowMs(), oscWindowMs())}`);
+      // posreduj novo casovno bazo pravi napravi (samo Realno delovanje -
+      // simulacijski nacini imajo fiksno vzorcevalno periodo v tem UI-ju)
+      if(s.opMode==='real') sendCommand(s, 'scope/set', { timebase_ms: tb });
+      renderOscFull();
+    };
+    bar.appendChild(b);
+  });
+
+  // HH2: gumbi za zoom (stevilo vzorcev v oknu)
+  const zb = document.getElementById('oscZoomBar');
+  if(zb){
+    OSC_ZOOMS.forEach(n=>{
+      const b = document.createElement('button');
+      b.textContent = n >= 1000 ? (n/1000)+'k' : n;
+      b.setAttribute('aria-pressed', n===OSC_SAMPLES ? 'true':'false');
+      b.onclick = ()=>{ OSC_SAMPLES = n; OSC_ZOOM = 1;
+        logDebug(`OSC: zoom=${n} vzorcev, okno=${fmtDur(oscWindowMs(), oscWindowMs())}`);
+        renderOscFull(); };
+      zb.appendChild(b);
+    });
+  }
+  updateOscPosInfo();
+
+  ['rele','servo','analog'].forEach(grp=>drawOscGroup('full_'+grp, s.id, grp));
+  attachOscGestures('full_rele', s.id, 'rele');
+  attachOscGestures('full_servo', s.id, 'servo');
+  attachOscGestures('full_analog', s.id, 'analog');
+}
+
+// Barve grafa se berejo iz trenutne palete (ne trdo zapisane),
+// da osciloskop ustreza izbrani temi tudi pri svetlih paletah.
+let OSC_COLORS = ['#FFD23F','#86B06A','#62A8C4','#D3543A'];
+let GRID_COLOR = '#38423C';
+let AXIS_TXT_COLOR = '#8A968F';
+// T1: barve SLEDI so FIKSNE in med seboj kar najbolj razlocne - prej so se
+// brale iz palete, zato so bile pri temah kot "Terminal" vse odtenki zelene
+// in kanalov ni bilo mogoce lociti. Mreza/okvir/osi ostanejo vezani na paleto.
+const TRACE_DARK  = ['#FFD23F','#4FD37C','#4FA8FF','#FF5A3D']; // za temne teme
+const TRACE_LIGHT = ['#8A5200','#0F5B33','#00417A','#A80000']; // za svetle teme
+function isLightTheme(){
+  const ink = (getComputedStyle(document.documentElement).getPropertyValue('--ink')||'').trim();
+  const h = ink.replace('#','');
+  if(h.length < 6) return false;
+  const r = parseInt(h.slice(0,2),16), g2 = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
+  return (r+g2+b) > 380;   // enak prag kot pri EF projektu
+}
+function syncOscColors(){
+  const cs = getComputedStyle(document.documentElement);
+  const g = n => (cs.getPropertyValue('--'+n)||'').trim();
+  OSC_COLORS = isLightTheme() ? TRACE_LIGHT.slice() : TRACE_DARK.slice();
+  GRID_COLOR = g('line')||GRID_COLOR;
+  AXIS_TXT_COLOR = g('mute')||AXIS_TXT_COLOR;
+}
+
+function drawOscGroup(key, siteId, grp){
+  const canvas = document.getElementById('oscCanvas_'+key);
+  const wrap = document.getElementById('oscCanvasWrap_'+key);
+  if(!canvas || !wrap) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = wrap.clientWidth || 300, h = wrap.clientHeight || 64;
+  canvas.width = w*dpr; canvas.height = h*dpr;
+  canvas.style.width = w+'px'; canvas.style.height = h+'px';
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,h);
+
+  const isMini = key.startsWith('mini');
+  // levo: prostor za y-skalo; spodaj: prostor za casovno os (samo v "full" pogledu)
+  const marginL = isMini ? 4 : 30;
+  const marginB = isMini ? 0 : 14;
+  const marginT = 4, marginR = 4;
+  const plotX = marginL, plotY = marginT;
+  const plotW = w - marginL - marginR, plotH = h - marginT - marginB;
+
+  // okvir
+  ctx.strokeStyle = GRID_COLOR; ctx.lineWidth = 1;
+  ctx.strokeRect(plotX+0.5, plotY+0.5, plotW-1, plotH-1);
+
+  const buf = OSCBUF[siteId] || [];
+  const windowMs = oscWindowMs();
+  const now = oscNowRef();   // EE3: pri zamrznjenem prikazu je to trenutek ustavitve (+ drsenje)
+  const samples = buf.slice(lowerBound(buf, now-windowMs));   // EE7
+
+  if(!isMini){
+    // navpicne pomozne crte (4 delitve) + casovna os spodaj
+    ctx.strokeStyle = GRID_COLOR; ctx.lineWidth = 1;
+    ctx.font = '9px monospace'; ctx.fillStyle = AXIS_TXT_COLOR;
+    for(let d=0; d<=4; d++){
+      const x = plotX + plotW*(d/4);
+      ctx.beginPath(); ctx.moveTo(x, plotY); ctx.lineTo(x, plotY+plotH); ctx.stroke();
+      const label = d===4 ? T('oscNow') : '-'+fmtDur(windowMs*(4-d)/4, windowMs);
+      ctx.textAlign = d===0?'left':(d===4?'right':'center');
+      ctx.fillText(label, x, h-2);
+    }
+    // vodoravne pomozne crte (3 delitve) + y-skala levo
+    for(let d=0; d<=2; d++){
+      const y = plotY + plotH*(d/2);
+      ctx.beginPath(); ctx.moveTo(plotX, y); ctx.lineTo(plotX+plotW, y); ctx.stroke();
+    }
+    ctx.textAlign = 'right';
+    if(grp==='servo'){
+      ctx.fillText('255', marginL-3, plotY+8);
+      ctx.fillText('0', marginL-3, plotY+plotH-1);
+    } else if(grp==='analog'){
+      ctx.fillText('40V', marginL-3, plotY+8);
+      ctx.fillText('20V', marginL-3, plotY+plotH/2+3);
+      ctx.fillText('0V', marginL-3, plotY+plotH-1);
+    } else if(grp==='rele'){
+      const rowH = plotH/4;
+      ['R1','R2','R3','R4'].forEach((nm,i)=>{ ctx.fillText(nm, marginL-3, plotY+i*rowH+rowH/2+3); });
+    }
+  }
+
+  // GG6: vsi trije grafi izhajajo iz ISTEGA bufferja (enoten 19B zapis)
+  if(samples.length < 2){
+    ctx.fillStyle = AXIS_TXT_COLOR; ctx.font = '11px monospace'; ctx.textAlign='left';
+    ctx.fillText(T('oscNoData'), plotX+8, plotY+plotH/2);
+    return;
+  }
+
+  const t0 = now-windowMs, t1 = now;
+  const xOf = (t)=> plotX + ((t-t0)/(t1-t0)) * plotW;
+
+  if(grp==='rele'){
+    // DD3: stopnicasta crta IZ DOGODKOV - stopnica stoji na tocnem casu
+    // preklopa, ne glede na izbrano casovno bazo. Med dogodkoma je stanje
+    // po definiciji nespremenjeno, zato ravna crta.
+    // GG6: stopnicasto iz zaporednih vzorcev - vrednost velja do naslednjega
+    for(let ch=0; ch<4; ch++){
+      ctx.strokeStyle = OSC_COLORS[ch]; ctx.lineWidth = 1.5; ctx.beginPath();
+      const rowH = plotH/4, yOn = plotY+ch*rowH+3, yOff = plotY+ch*rowH+rowH-3;
+      let prevY = samples[0].rele[ch] ? yOn : yOff;
+      ctx.moveTo(xOf(samples[0].t), prevY);
+      for(let i=1;i<samples.length;i++){
+        const x = xOf(samples[i].t), y = samples[i].rele[ch] ? yOn : yOff;
+        if(y !== prevY){ ctx.lineTo(x, prevY); ctx.lineTo(x, y); prevY = y; }
+        else ctx.lineTo(x, y);
+      }
+      ctx.lineTo(plotX+plotW, prevY);
+      ctx.stroke();
+    }
+  } else if(grp==='servo'){
+    // DD4: pozicija se za VSAK x-piksel izracuna iz rampe, ki takrat velja -
+    // gladka krivulja pri katerikoli bazi, brez odvisnosti od vzorcenja.
+    // GG6: iz zaporednih vzorcev (rampa je vidna tako gosto, kot je vzorcenje)
+    for(let ch=0; ch<2; ch++){
+      ctx.strokeStyle = OSC_COLORS[ch]; ctx.lineWidth = 1.5; ctx.beginPath();
+      samples.forEach((p,i)=>{
+        const x = xOf(p.t), y = plotY + plotH - (p.servo[ch]/255)*plotH;
+        if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.stroke();
+    }
+  } else { // analog
+    ['a1','a2','a3','a4'].forEach((k,ch)=>{
+      ctx.strokeStyle = OSC_COLORS[ch]; ctx.lineWidth = 1.5; ctx.beginPath();
+      samples.forEach((p,idx)=>{
+        const v = (p.analog && p.analog[k]) || 0;
+        const x = xOf(p.t); const y = plotY + plotH - (Math.min(v,40)/40)*plotH;
+        if(idx===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.stroke();
+    });
+  }
+}
+
+function attachOscGestures(key, siteId, grp){
+  const wrap = document.getElementById('oscCanvasWrap_'+key);
+  const tip = document.getElementById('oscTip_'+key);
+  if(!wrap) return;
+  let pinchStartDist = null, pinchStartZoom = 1;
+
+  wrap.addEventListener('touchstart', (e)=>{
+    if(e.touches.length===2){
+      pinchStartDist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+      pinchStartZoom = OSC_ZOOM;
+    }
+  }, {passive:true});
+  wrap.addEventListener('touchmove', (e)=>{
+    if(e.touches.length===2 && pinchStartDist){
+      e.preventDefault(); // prepreci privzeto brskalnikovo obnasanje SAMO med scipanjem z 2 prstoma
+      const d = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+      let z = pinchStartZoom * (d/pinchStartDist);
+      OSC_ZOOM = Math.max(0.2, Math.min(8, z));
+      ['rele','servo','analog'].forEach(g=>drawOscGroup('full_'+g, siteId, g)); // takojsen odziv na scipanje
+    }
+    // z 1 prstom preventDefault NI klican - touch-action:pan-y v CSS
+    // prepusti navpicno drsenje strani brskalniku.
+  }, {passive:false});
+  // HH4: drsenje po bufferju deluje VEDNO (tudi med zivim prikazom).
+  // Ob zacetku drsenja se zivo sledenje prekine, sicer bi novi podatki
+  // premikali okno pod prstom. Ko poteg doseze skrajni desni rob (PAN=0),
+  // se zivo sledenje obnovi.
+  let panStartX = null, panStartY = null, panStartVal = 0;
+  wrap.addEventListener('touchstart', (e)=>{
+    if(e.touches.length===1){
+      panStartX = e.touches[0].clientX; panStartY = e.touches[0].clientY; panStartVal = OSC_PAN;
+    }
+  }, {passive:true});
+  wrap.addEventListener('touchmove', (e)=>{
+    if(panStartX===null || e.touches.length!==1) return;
+    const dx = e.touches[0].clientX - panStartX;
+    const dy = e.touches[0].clientY - (panStartY||0);
+    // GG7: prag 20px IN pretezno vodoraven premik - tap za odcitek in
+    // navpicno drsenje strani ne smeta ustaviti prikaza (prej je ze rahel
+    // premik pri tapu sprozil ustavitev).
+    if(Math.abs(dx) < 20 || Math.abs(dx) < Math.abs(dy)) return;
+    e.preventDefault();
+    if(OSC_RUNNING){                          // prvi premik ustavi sledenje
+      OSC_RUNNING = false; OSC_FROZEN_AT = Date.now();
+      // GG7: med potezo NE renderOscFull() (preri\u0161e cel zavihek in prekine
+      // potezo) - stanje gumba osvezimo sele ob koncu poteze
+    }
+    // poteg desno = nazaj v preteklost; omejeno na dolzino bufferja
+    const buf = OSCBUF[siteId] || [];
+    const oldestT = buf.length ? buf[0].t : Date.now();
+    const maxPan = Math.max(0, (OSC_FROZEN_AT || Date.now()) - oldestT);
+    OSC_PAN = Math.max(0, Math.min(maxPan, panStartVal + (dx / wrap.clientWidth) * oscWindowMs()));
+    if(OSC_PAN === 0 && dx < 0){              // nazaj na desni rob -> zivo
+      OSC_RUNNING = true; renderOscFull(); panStartX = null; return;
+    }
+    updateOscPosInfo();
+    ['rele','servo','analog'].forEach(g=>drawOscGroup('full_'+g, siteId, g));
+  }, {passive:false});
+
+  wrap.addEventListener('touchend', (e)=>{
+    pinchStartDist = null;
+    if(panStartX!==null && Math.abs((e.changedTouches[0]||{}).clientX - panStartX) > 20){
+      panStartX = panStartY = null;
+      renderOscFull();   // GG7: sele zdaj osvezi gumb/oznako polozaja
+      return;
+    }
+    panStartX = panStartY = null;
+    if(e.changedTouches && e.changedTouches.length===1 && (!e.touches || e.touches.length===0)){
+      showOscTip(key, siteId, grp, e.changedTouches[0].clientX, wrap, tip);
+    }
+  });
+  wrap.addEventListener('click', (e)=>{ showOscTip(key, siteId, grp, e.clientX, wrap, tip); });
+}
+
+function showOscTip(key, siteId, grp, clientX, wrap, tip){
+  const windowMs = oscWindowMs();
+  const now = oscNowRef();   // EE3
+  const rect = wrap.getBoundingClientRect();
+  const frac = Math.max(0, Math.min(1, (clientX-rect.left)/rect.width));
+  const t0 = now-windowMs, t1 = now;
+  const targetT = t0 + frac*(t1-t0);
+
+  // GG6: vsi kanali iz istega bufferja - poiscemo najblizji vzorec
+  const buf = OSCBUF[siteId]||[];
+  const from = lowerBound(buf, t0);
+  if(from >= buf.length) return;
+  let nearest = buf[from], best = Infinity;
+  for(let i=from;i<buf.length && buf[i].t<=t1;i++){
+    const d = Math.abs(buf[i].t - targetT);
+    if(d < best){ best = d; nearest = buf[i]; }
+  }
+  let txt = new Date(nearest.t).toLocaleTimeString() + ' · ';
+  if(grp==='rele') txt += 'R:' + nearest.rele.map(b=>b?'1':'0').join('');
+  else if(grp==='servo') txt += 'S1:'+nearest.servo[0]+' S2:'+nearest.servo[1];
+  else txt += Object.keys(nearest.analog||{}).map(k=>k+':'+nearest.analog[k].toFixed(1)).join(' ');
+
+  tip.textContent = txt;
+  tip.style.display = 'block';
+  clearTimeout(tip._to);
+  tip._to = setTimeout(()=>{ tip.style.display='none'; }, 3000);
+}
+
+// V2: DRSECI izris - preris ~20x/s prek requestAnimationFrame, zato se
+// casovno okno premika zvezno in krivulja gladko drsi z desne proti levi.
+// Prej je bil preris na 500ms, zato je celotna slika poskocila za pol
+// sekunde naenkrat. 20 slik/s je vizualno gladko, a varcno z baterijo.
+// DD6: firmware po 30s brez scope/set preklopi na pocasno vzorcenje (1/s).
+// Dokler je zavihek Osciloskop odprt, zahtevo osvezujemo vsakih 10s, sicer
+// ADC preneha prihajati v izbrani casovni bazi.
+setInterval(()=>{
+  if(currentTab !== 'osciloskop') return;
+  const s = currentSite();
+  if(s && s.opMode === 'real') sendCommand(s, 'scope/set', { timebase_ms: OSC_TIMEBASE });
+}, 10000);
+
+const OSC_FPS = 20, OSC_FRAME_MS = 1000/OSC_FPS;
+let _lastOscFrame = 0;
+function oscFrame(ts){
+  requestAnimationFrame(oscFrame);
+  if(ts - _lastOscFrame < OSC_FRAME_MS) return;
+  _lastOscFrame = ts;
+  if(currentTab !== 'osciloskop') return;
+  // TT1: izris preskocimo (platno ni vidno), SPREJEM podatkov pa tece naprej -
+  // zapisi se zbirajo v buffer in se ob vrnitvi takoj izrisejo.
+  if(document.hidden) return;
+  if(!OSC_RUNNING) return;                 // EE3: zamrznjeno - izris sprozi drsenje
+  const s = currentSite(); if(!s) return;
+  ['rele','servo','analog'].forEach(g=>drawOscGroup('full_'+g, s.id, g));
+}
+requestAnimationFrame(oscFrame);
+
+/* ============================================================
+   ZAGON
+   ============================================================ */
+// H3: visina fiksne glave ni konstantna (vrstica z nacinom delovanja se
+// pri realnem nacinu ne izpise, besedilo se lahko prelomi pri drugem jeziku),
+// zato jo izmerimo in prenesemo v CSS spremenljivko --topH.
+function syncTopHeight(){
+  const top = document.querySelector('.top');
+  if(!top) return;
+  document.documentElement.style.setProperty('--topH', top.getBoundingClientRect().height + 'px');
+}
+window.addEventListener('resize', syncTopHeight);
+window.addEventListener('orientationchange', ()=>setTimeout(syncTopHeight, 150));
+
+// Q1: UI je VIR RESNICE. Ob nalaganju strani ali preklopu naprave posljemo
+// napravi celotno stanje iz UICMD (4 releji + 2 serva), da se ne razideta.
+// Prej se to ni zgodilo: UI se je izrisal iz UICMD (Rocno/OFF), virtualna
+// naprava pa obnovila iz SIMS (npr. se vedno oscillate) in nihala naprej -
+// gumb je pisal OFF, graf pa je kazal nihanje.
+let _syncedSites = new Set();
+function syncDeviceToUI(site, force){
+  if(!site) return;
+  // JJ2: pri REALNI napravi je vir resnice NAPRAVA (ima svoj NVS in obnovljeno
+  // stanje). Prej je aplikacija ob zagonu poslala staro stanje iz localStorage
+  // in s tem prepisala dejansko stanje naprave. Pri simulaciji ostane, ker
+  // virtualna naprava lastnega trajnega stanja nima.
+  if(site.opMode === 'real'){
+    logDebug(`syncDeviceToUI ${site.id}: preskoceno (realna naprava je vir resnice)`);
+    return;
+  }
+  if(!force && _syncedSites.has(site.id)) return;
+  _syncedSites.add(site.id);
+  const uc = ensureUICmd(site.id);
+  const L = ensureLive(site.id);
+  // S5: ukazi ZAPOREDNO z zamikom - ob posiljanju vseh v isti milisekundi
+  // jih je javni broker deloma zavrgel (servo ukaza nista nikoli prispela).
+  const queue = [];
+  for(let i=0;i<4;i++){
+    const r = uc.rele[i];
+    queue.push([`rele/${i+1}/set`, r.mode === 'period'
+      ? {mode:'blink', ton:r.ton, toff:r.toff}
+      : {mode:'static', state:!!r.on}]);
+  }
+  for(let i=0;i<2;i++){
+    const v = uc.servo[i];
+    queue.push([`servo/${i+1}/set`, v.mode === 'period'
+      ? {mode:'oscillate', posA:v.posA, posB:v.posB, ton:v.ton, toff:v.toff, rampMs:v.rampMsP}
+      : {mode:'static', pos: v.on ? v.posOn : v.posOff, posOff:v.posOff, posOn:v.posOn, rampMs:v.rampMs}]);
+  }
+  // S5: uskladi tudi binarno stetje - prej izpusceno, zato je ostalo
+  // vklopljeno iz prejsnje seje, ceprav ga v UI ni bilo vklopljeno
+  queue.push(['binarno/set', {on: !!L.binOn, perioda: L.binPeriod||1}]);
+
+  queue.forEach(([topic, payload], k)=>{
+    setTimeout(()=>sendCommand(site, topic, payload), k*120);
+  });
+  logDebug(`syncDeviceToUI ${site.id}: v vrsti ${queue.length} ukazov (zamik 120ms)`);
+}
+
+function renderAll(){
+  renderSiteMenu();
+  renderConnPill();
+  if(currentTab==='nadzor') renderNadzorControls();
+  if(currentTab==='simulator') renderSimulatorControls();
+  if(currentTab==='osciloskop') renderOscFull();
+}
+
+applyTheme(lsGetPlain('rs_theme','pasnik'));  // uveljavi shranjeno paleto
+syncOscColors();
+document.documentElement.setAttribute('lang', LANG);
+document.querySelectorAll('[data-i]').forEach(el=>{ el.textContent = T(el.getAttribute('data-i')); });
+fixSiteIdx();   // OO1: enotna logika tudi ob zagonu
+requestWakeLock();   // TT4
+connectAll(); // ze poskrbi za ensureSimBrokerListening() na VSEH sim_broker napravah, ne le tekocih
+renderTabs();
+renderAll();
+buildLangGrid();
+syncTopHeight();
+window.addEventListener('load', syncTopHeight);
+// Q1: uskladi napravo z UI stanjem; z zamikom, da se MQTT povezava vzpostavi
+setTimeout(()=>{ CFG.sites.forEach(site=>syncDeviceToUI(site)); }, 1200);
+
+document.addEventListener('click', (e)=>{
+  const box=document.getElementById('headbox'), menu=document.getElementById('siteMenu');
+  if(!box.contains(e.target) && !menu.contains(e.target)){
+    menu.classList.remove('open'); box.setAttribute('data-open','0');
+  }
+});
+</script>
+</body>
+</html>
